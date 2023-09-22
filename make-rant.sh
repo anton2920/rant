@@ -57,7 +57,7 @@ packagefile runtime/internal/sys=$STDDIR/runtime/internal/sys.a
 packagefile runtime=$STDDIR/runtime.a
 EOF
 
-ASMSRC=`ls *.s`
+ASMSRC=`ls *.s | grep -v 'rant'`
 GOSRC=`ls *.go | grep -v '_test'`
 
 STARTTIME=`date +%s`
@@ -66,24 +66,30 @@ touch $BUILDDIR/go_asm.h
 
 case $1 in
 	disas | disasm)
-		printvv go tool compile -o $BUILDDIR/main.a -trimpath "$BUILDDIR=>" -S -c=$GOMAXPROCS -nolocalimports -importcfg $BUILDDIR/importcfg -pack $GOSRC
-		go tool compile -o $BUILDDIR/main.a -trimpath "$BUILDDIR=>" -S -c=$GOMAXPROCS -nolocalimports -importcfg $BUILDDIR/importcfg -pack $GOSRC >$PROJECT.s 2>&1
+		run go tool asm -p main -I $BUILDDIR -I $GOROOT/pkg/include -I /usr/include/sys/ -D GOOS_$GOOS -D GOARCH_$GOARCH $5 -D GOAMD64_$GOAMD64  -I $GOROOT/src/runtime -gensymabis -o $BUILDDIR/symabis $ASMSRC
+		printvv go tool compile -o $BUILDDIR/main.a -trimpath "$BUILDDIR=>" -p main -symabis $BUILDDIR/symabis -S -c=$GOMAXPROCS -nolocalimports -importcfg $BUILDDIR/importcfg -pack -asmhdr $BUILDDIR/go_asm.h $GOSRC
+		go tool compile -o $BUILDDIR/main.a -trimpath "$BUILDDIR=>" -p main -symabis $BUILDDIR/symabis -S -c=$GOMAXPROCS -nolocalimports -importcfg $BUILDDIR/importcfg -pack -asmhdr $BUILDDIR/go_asm.h $GOSRC >$PROJECT.s 2>&1
 		;;
 	esc | escape | escape-analysis)
 		printvv go tool compile -o $BUILDDIR/main.a -trimpath "$BUILDDIR=>" -m -m -c=$GOMAXPROCS -nolocalimports -importcfg $BUILDDIR/importcfg -pack $GOSRC
 		go tool compile -o $BUILDDIR/main.a -trimpath "$BUILDDIR=>" -m -m -c=$GOMAXPROCS -nolocalimports -importcfg $BUILDDIR/importcfg -pack $GOSRC >$PROJECT.esc 2>&1
 		;;
 	objdump)
-		run go tool compile -o $BUILDDIR/main.a -trimpath "$BUILDDIR=>" -p main -c=$GOMAXPROCS -nolocalimports -importcfg $BUILDDIR/importcfg -pack $GOSRC
+		run go tool asm -p main -I $BUILDDIR -I $GOROOT/pkg/include -I /usr/include/sys/ -D GOOS_$GOOS -D GOARCH_$GOARCH $5 -D GOAMD64_$GOAMD64  -I $GOROOT/src/runtime -gensymabis -o $BUILDDIR/symabis $ASMSRC
+		run go tool compile -o $BUILDDIR/main.a -trimpath "$BUILDDIR=>" -p main -symabis $BUILDDIR/symabis -c=$GOMAXPROCS -nolocalimports -importcfg $BUILDDIR/importcfg -pack -asmhdr $BUILDDIR/go_asm.h $GOSRC
+		for file in $ASMSRC; do
+			run go tool asm -p main -I $BUILDDIR -I $GOROOT/pkg/include -I /usr/include/sys/ -D GOOS_$GOOS -D GOARCH_$GOARCH -D GOAMD64_$GOAMD64 -I $GOROOT/src/runtime -o $BUILDDIR/`basename $file`.o $file
+		done
+		run go tool pack r $BUILDDIR/main.a $BUILDDIR/*.o
 		run go tool link -o $PROJECT -importcfg=$BUILDDIR/importcfg.link $BUILDDIR/main.a
 		printvv go tool objdump -S -s ^main\. $PROJECT
 		go tool objdump -S -s ^main\. $PROJECT >$PROJECT.s
 		;;
 	release)
-		run go tool asm -p main -I $BUILDDIR -I $GOROOT/pkg/include -D GOOS_$GOOS -D GOARCH_$GOARCH $5 -D GOAMD64_$GOAMD64  -I $GOROOT/src/runtime -gensymabis -o $BUILDDIR/symabis $ASMSRC
+		run go tool asm -p main -I $BUILDDIR -I $GOROOT/pkg/include -I /usr/include/sys/ -D GOOS_$GOOS -D GOARCH_$GOARCH $5 -D GOAMD64_$GOAMD64  -I $GOROOT/src/runtime -gensymabis -o $BUILDDIR/symabis $ASMSRC
 		run go tool compile -o $BUILDDIR/main.a -trimpath "$BUILDDIR=>" -p main -symabis $BUILDDIR/symabis -c=$GOMAXPROCS -nolocalimports -importcfg $BUILDDIR/importcfg -pack -asmhdr $BUILDDIR/go_asm.h $GOSRC
 		for file in $ASMSRC; do
-			run go tool asm -p main -I $BUILDDIR -I $GOROOT/pkg/include -D GOOS_$GOOS -D GOARCH_$GOARCH -D GOAMD64_$GOAMD64 -I $GOROOT/src/runtime -o $BUILDDIR/`basename $file`.o $file
+			run go tool asm -p main -I $BUILDDIR -I $GOROOT/pkg/include -I /usr/include/sys/ -D GOOS_$GOOS -D GOARCH_$GOARCH -D GOAMD64_$GOAMD64 -I $GOROOT/src/runtime -o $BUILDDIR/`basename $file`.o $file
 		done
 		run go tool pack r $BUILDDIR/main.a $BUILDDIR/*.o
 		run go tool link -o $PROJECT -s -w -importcfg=$BUILDDIR/importcfg.link $BUILDDIR/main.a
