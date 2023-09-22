@@ -40,6 +40,8 @@ const (
 
 	SEEK_SET = 0
 	SEEK_END = 2
+
+	PATH_MAX = 1024
 )
 
 var (
@@ -72,12 +74,16 @@ func HandleConn(c int32) {
 	Close(c)
 }
 
-/* NOTE(anton2920): string must be '\0'-terminated. */
 func ReadPage(name string, data *[]byte) {
+	var nameBuf [2 * PATH_MAX]byte
 	var fd int32
 	var flen int
 
-	if fd = Open(name, O_RDONLY, 0); fd < 0 {
+	/* NOTE(anton2920): this sh**t is needed, because open(2) requires '\0'-terminated string. */
+	for i := 0; i < len(name); i++ {
+		nameBuf[i] = name[i]
+	}
+	if fd = Open(unsafe.String((*byte)(&nameBuf[0]), len(name)+1), O_RDONLY, 0); fd < 0 {
 		Fatal("Failed to open '"+name+"': ", fd)
 	}
 	if flen = Lseek(fd, 0, SEEK_END); flen < 0 {
@@ -102,7 +108,7 @@ func main() {
 
 	var ret, l int32
 
-	ReadPage("pages/index.html\x00", &IndexPage)
+	ReadPage("pages/index.html", &IndexPage)
 
 	if l = Socket(PF_INET, SOCK_STREAM, 0); l < 0 {
 		Fatal("Failed to create socket: ", l)
