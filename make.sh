@@ -89,6 +89,11 @@ case $1 in
 			run gofmt -l -s -w *.go
 		fi
 		;;
+	vet)
+		run go vet
+		run $0 $VERBOSITYFLAGS clean
+		rm -rf $HOME/.cache/go-build/
+		;;
 	disas | disasm | esc | escape | escape-analysis | objdump | release)
 		run ./make-rant.sh $VERBOSITYFLAGS $1
 		;;
