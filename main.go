@@ -1,7 +1,3 @@
-/* TODO(anton2920):
- *
- */
-
 package main
 
 import "unsafe"
@@ -34,8 +30,20 @@ const (
 	SOL_SOCKET   = 0xFFFF
 	SO_REUSEPORT = 0x00000200
 
+	SHUT_WR = 1
+
 	/* NOTE(anton2920): see <netinet/in.h>. */
 	INADDR_ANY = 0
+
+	/* NOTE(anton2920): see <fcntl.h>. */
+	O_RDONLY = 0
+
+	SEEK_SET = 0
+	SEEK_END = 2
+)
+
+var (
+	IndexPage []byte
 )
 
 func Fatal(msg string, code int32) {
@@ -43,20 +51,58 @@ func Fatal(msg string, code int32) {
 	Exit(1)
 }
 
-func SwapBytesInWord(x uint16) uint16 {
-	return ((x << 8) & 0xFF00) | (x >> 8)
+func WriteAll(c int32, buf []byte) {
+	var sent int
+	for sent < len(buf) {
+		n := Write(c, buf[sent:])
+		sent += n
+	}
 }
 
 func HandleConn(c int32) {
-	const reply = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 89\r\nConnection: keep-alive\r\n\r\n<!DOCTYPE html><head><title>Rant</title></head><body><h1>Hello, world!</h1></body></html>"
-	Write(c, []byte(reply))
+	var buffer [1024]byte
+
+	/* NOTE(anton2920): browser must send its request first, but I don't really care about it at this point, so block until it's received. */
+	Read(c, buffer[:])
+
+	const headers = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n"
+	WriteAll(c, []byte(headers))
+	WriteAll(c, IndexPage)
+	Shutdown(c, SHUT_WR)
 	Close(c)
+}
+
+/* NOTE(anton2920): string must be '\0'-terminated. */
+func ReadPage(name string, data *[]byte) {
+	var fd int32
+	var flen int
+
+	if fd = Open(name, O_RDONLY, 0); fd < 0 {
+		Fatal("Failed to open '"+name+"': ", fd)
+	}
+	if flen = Lseek(fd, 0, SEEK_END); flen < 0 {
+		Fatal("Failed to get file length: ", int32(flen))
+	}
+	*data = make([]byte, flen)
+	if ret := Lseek(fd, 0, SEEK_SET); ret < 0 {
+		Fatal("Failed to seek to the beginning of the file: ", int32(flen))
+	}
+	if n := Read(fd, *data); n != flen {
+		Fatal("Failed to read page contents: ", int32(n))
+	}
+	Close(fd)
+}
+
+func SwapBytesInWord(x uint16) uint16 {
+	return ((x << 8) & 0xFF00) | (x >> 8)
 }
 
 func main() {
 	const port = 7070
 
 	var ret, l int32
+
+	ReadPage("pages/index.html\x00", &IndexPage)
 
 	if l = Socket(PF_INET, SOCK_STREAM, 0); l < 0 {
 		Fatal("Failed to create socket: ", l)
@@ -68,7 +114,7 @@ func main() {
 	}
 
 	addr := SockAddrIn{Family: AF_INET, Addr: INADDR_ANY, Port: SwapBytesInWord(port)}
-	if ret = Bind(l, &addr, uint32(unsafe.Sizeof(addr))); ret != 0 {
+	if ret = Bind(l, &addr, uint32(unsafe.Sizeof(addr))); ret < 0 {
 		Fatal("Failed to bind socket to address: ", ret)
 	}
 

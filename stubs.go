@@ -19,9 +19,23 @@ func Exit(status int32)
 //go:nosplit
 func Listen(s int32, backlog int32) int32
 
+//go:nosplit
+func Lseek(fd int32, offset int, whence int32) int
+
+//go:noescape
+//go:nosplit
+func Open(path string, flags int32, mode uint16) int32
+
+//go:noescape
+//go:nosplit
+func Read(fd int32, buf []byte) int
+
 //go:noescape
 //go:nosplit
 func Setsockopt(s, level, optname int32, optval unsafe.Pointer, optlen uint32) int32
+
+//go:nosplit
+func Shutdown(s int32, how int32) int32
 
 //go:nosplit
 func Socket(domain, typ, protocol int32) int32
