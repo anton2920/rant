@@ -44,6 +44,31 @@ TEXT main·Exit(SB), NOSPLIT, $0-4
 	MOVL status+0(FP), DI
 	SYSCALL
 	/* NOTE(anton2920): this is the point of noreturn. */
+	MOVQ 0x0, AX
+
+/* func Kevent(kq int32, changelist []Kevent, eventlist []Kevent, timeout *Timespec) */
+TEXT main·Kevent(SB), NOSPLIT, $0-60
+	MOVQ $SYS_kevent, AX
+	MOVL kq+0(FP), DI
+	MOVQ chlist+8(FP), SI
+	MOVQ nchanges+16(FP), DX
+	MOVQ evlist+32(FP), R10
+	MOVQ nevents+40(FP), R8
+	MOVQ timeout+56(FP), R9
+	SYSCALL
+	JCC 2(PC)
+	NEGL AX
+	MOVL AX, ret+64(FP)
+	RET
+
+/* func Kqueue() int32 */
+TEXT main·Kqueue(SB), NOSPLIT, $0-0
+	MOVQ $SYS_kqueue, AX
+	SYSCALL
+	JCC 2(PC)
+	NEGL AX
+	MOVL AX, ret+0(FP)
+	RET
 
 /* func Listen(s int32, backlog int32) int32 */
 TEXT main·Listen(SB), NOSPLIT, $0-8
@@ -66,6 +91,17 @@ TEXT main·Lseek(SB), NOSPLIT, $0-16
 	JCC 2(PC)
 	NEGQ AX
 	MOVQ AX, ret+24(FP)
+	RET
+
+/* func Nanosleep(rqtp, rmtp *Timespec) int32 */
+TEXT main·Nanosleep(SB), NOSPLIT, $0-16
+	MOVQ $SYS_nanosleep, AX
+	MOVQ rqtp+0(FP), DI
+	MOVQ rmtp+8(FP), SI
+	SYSCALL
+	JCC 2(PC)
+	NEGL AX
+	MOVL AX, ret+16(FP)
 	RET
 
 /* func Open(path string, flags int32, mode uint16) int32 */

@@ -16,11 +16,22 @@ func Close(fd int32) int32
 //go:nosplit
 func Exit(status int32)
 
+//go:noescape
+//go:nosplit
+func Kevent(kq int32, changelist []Kevent_t, eventlist []Kevent_t, timeout *Timespec) int32
+
+//go:nosplit
+func Kqueue() int32
+
 //go:nosplit
 func Listen(s int32, backlog int32) int32
 
 //go:nosplit
 func Lseek(fd int32, offset int, whence int32) int
+
+//go:noescape
+//go:nosplit
+func Nanosleep(rqtp, rmtp *Timespec) int32
 
 //go:noescape
 //go:nosplit

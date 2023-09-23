@@ -20,8 +20,22 @@ type SockAddrIn struct {
  */
 type SockAddr = SockAddrIn
 
+type Kevent_t struct {
+	Ident  uintptr
+	Filter int16
+	Flags  uint16
+	Fflags uint32
+	Data   int
+	Udata  unsafe.Pointer
+	Ext    [4]uint
+}
+
+type Timespec struct {
+	Sec, Nsec int
+}
+
 const (
-	/* NOTE(anton2920): see <sys/socket.h>. */
+	/* From <sys/socket.h>. */
 	AF_INET = 2
 	PF_INET = AF_INET
 
@@ -32,33 +46,67 @@ const (
 
 	SHUT_WR = 1
 
-	/* NOTE(anton2920): see <netinet/in.h>. */
+	/* From <netinet/in.h>. */
 	INADDR_ANY = 0
 
-	/* NOTE(anton2920): see <fcntl.h>. */
+	/* From <fcntl.h>. */
 	O_RDONLY = 0
 
 	SEEK_SET = 0
 	SEEK_END = 2
 
 	PATH_MAX = 1024
+
+	/* From <sys/event.h>. */
+	EVFILT_VNODE = -4
+	EV_ADD       = 0x0001
+	EV_CLEAR     = 0x0020
+	NOTE_WRITE   = 0x0002
+
+	/* From <errno.h>. */
+	EINTR = 4
 )
 
 var (
-	IndexPage []byte
+	Pages       [10][]byte
+	PageKevents []Kevent_t
+
+	IndexPage *[]byte
 )
 
 func Fatal(msg string, code int32) {
-	println(msg, code)
+	println(msg, -code)
 	Exit(1)
 }
 
-func WriteAll(c int32, buf []byte) {
-	var sent int
-	for sent < len(buf) {
-		n := Write(c, buf[sent:])
-		sent += n
+func ReadFull(fd int32, buf []byte) int {
+	var read, n int
+	for read < len(buf) {
+		if n = Read(fd, buf[read:]); n < 0 {
+			if -n != EINTR {
+				return n
+			}
+			continue
+		}
+		read += n
 	}
+
+	return len(buf)
+}
+
+func WriteFull(fd int32, buf []byte) int {
+	var written, n int
+	for written < len(buf) {
+		if n = Write(fd, buf[written:]); n < 0 {
+			if -n != EINTR {
+				return n
+			}
+			continue
+		}
+		written += n
+	}
+
+	return len(buf)
 }
 
 func HandleConn(c int32) {
@@ -68,35 +116,77 @@ func HandleConn(c int32) {
 	Read(c, buffer[:])
 
 	const headers = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n"
-	WriteAll(c, []byte(headers))
-	WriteAll(c, IndexPage)
+	WriteFull(c, []byte(headers))
+	WriteFull(c, *IndexPage)
 	Shutdown(c, SHUT_WR)
 	Close(c)
 }
 
-func ReadPage(name string, data *[]byte) {
+func ReadEntireFile(fd int32) []byte {
+	var flen int
+	if flen = Lseek(fd, 0, SEEK_END); flen < 0 {
+		Fatal("Failed to get file length: ", int32(flen))
+	}
+	data := make([]byte, flen)
+	if ret := Lseek(fd, 0, SEEK_SET); ret < 0 {
+		Fatal("Failed to seek to the beginning of the file: ", int32(flen))
+	}
+	if n := ReadFull(fd, data); n < 0 {
+		Fatal("Failed to read entire file: ", int32(n))
+	}
+
+	return data
+}
+
+func ReadPage(name string) *[]byte {
 	var nameBuf [2 * PATH_MAX]byte
 	var fd int32
-	var flen int
 
 	/* NOTE(anton2920): this sh**t is needed, because open(2) requires '\0'-terminated string. */
 	for i := 0; i < len(name); i++ {
 		nameBuf[i] = name[i]
 	}
-	if fd = Open(unsafe.String((*byte)(&nameBuf[0]), len(name)+1), O_RDONLY, 0); fd < 0 {
+	if fd = Open(unsafe.String(&nameBuf[0], len(name)+1), O_RDONLY, 0); fd < 0 {
 		Fatal("Failed to open '"+name+"': ", fd)
 	}
-	if flen = Lseek(fd, 0, SEEK_END); flen < 0 {
-		Fatal("Failed to get file length: ", int32(flen))
+	PageKevents = append(PageKevents, Kevent_t{Ident: uintptr(fd), Filter: EVFILT_VNODE, Flags: EV_ADD | EV_CLEAR, Fflags: NOTE_WRITE})
+
+	Pages[fd] = ReadEntireFile(fd)
+	return &Pages[fd]
+}
+
+func SleepFull(time Timespec) {
+	/* NOTE(anton2920): doing it in loop to fight EINTR. */
+	for Nanosleep(&time, &time) < 0 {
 	}
-	*data = make([]byte, flen)
-	if ret := Lseek(fd, 0, SEEK_SET); ret < 0 {
-		Fatal("Failed to seek to the beginning of the file: ", int32(flen))
+}
+
+func MonitorPages() {
+	var kq, nevents int32
+
+	if kq = Kqueue(); kq < 0 {
+		Fatal("Failed to open a kernel queue: ", kq)
 	}
-	if n := Read(fd, *data); n != flen {
-		Fatal("Failed to read page contents: ", int32(n))
+
+	if nevents = Kevent(kq, PageKevents, nil, nil); nevents < 0 {
+		Fatal("Failed to register kernel events: ", nevents)
 	}
-	Close(fd)
+
+	var event Kevent_t
+	for {
+		if nevents = Kevent(kq, nil, unsafe.Slice(&event, 1), nil); nevents < 0 {
+			if -nevents != EINTR {
+				println("ERROR: failed to get kernel events: ", nevents)
+			}
+			continue
+		} else if nevents > 0 {
+			println("INFO: page has been changed. Reloading...")
+			Pages[event.Ident] = ReadEntireFile(int32(event.Ident))
+		}
+
+		/* NOTE(anton2920): sleep to prevent runaway events. */
+		SleepFull(Timespec{Nsec: 100000000})
+	}
 }
 
 func SwapBytesInWord(x uint16) uint16 {
@@ -108,7 +198,8 @@ func main() {
 
 	var ret, l int32
 
-	ReadPage("pages/index.html", &IndexPage)
+	IndexPage = ReadPage("pages/index.html")
+	go MonitorPages()
 
 	if l = Socket(PF_INET, SOCK_STREAM, 0); l < 0 {
 		Fatal("Failed to create socket: ", l)
