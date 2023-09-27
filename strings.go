@@ -1,7 +1,5 @@
 package main
 
-func FindSubstring(haystack, needle string) int
-
 func FindRune(haystack string, needle rune) int {
 	for i, r := range haystack {
 		if r == needle {
@@ -11,3 +9,5 @@ func FindRune(haystack string, needle rune) int {
 
 	return -1
 }
+
+func FindSubstring(haystack, needle string) int

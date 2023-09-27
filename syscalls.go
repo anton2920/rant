@@ -18,6 +18,14 @@ func Exit(status int32)
 
 //go:noescape
 //go:nosplit
+func Fstat(fd int32, sb *Stat) int32
+
+//go:noescape
+//go:nosplit
+func Getdirentries(fd int32, buf []byte) int
+
+//go:noescape
+//go:nosplit
 func Kevent(kq int32, changelist []Kevent_t, eventlist []Kevent_t, timeout *Timespec) int32
 
 //go:nosplit

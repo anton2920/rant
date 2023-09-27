@@ -46,6 +46,30 @@ TEXT main·Exit(SB), NOSPLIT, $0-4
 	/* NOTE(anton2920): this is the point of noreturn. */
 	MOVQ 0x0, AX
 
+/* func Fstat(fd int32, sb *Stat) int32 */
+TEXT main·Fstat(SB), NOSPLIT, $0-12
+	MOVQ $SYS_fstat, AX
+	MOVL fd+0(FP), DI
+	MOVQ sb+8(FP), SI
+	SYSCALL
+	JCC 2(PC)
+	NEGL AX
+	MOVL AX, ret+16(FP)
+	RET
+
+/* func Getdirentries(fd int32, buf []byte) int */
+TEXT main·Getdirentries(SB), NOSPLIT, $0-28
+	MOVQ $SYS_getdirentries, AX
+	MOVL fd+0(FP), DI
+	MOVQ buf+8(FP), SI
+	MOVQ n+16(FP), DX
+	MOVQ $0x0, R10
+	SYSCALL
+	JCC 2(PC)
+	NEGQ AX
+	MOVQ AX, ret+32(FP)
+	RET
+
 /* func Kevent(kq int32, changelist []Kevent, eventlist []Kevent, timeout *Timespec) */
 TEXT main·Kevent(SB), NOSPLIT, $0-60
 	MOVQ $SYS_kevent, AX

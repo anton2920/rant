@@ -34,10 +34,38 @@ type Timespec struct {
 	Sec, Nsec int
 }
 
+/* See <sys/stat.h>. */
+type Stat struct {
+	Dev       uint   /* inode's device */
+	Ino       uint   /* inode's number */
+	Nlink     uint64 /* number of hard links */
+	Mode      uint16 /* inode protection mode */
+	_         int16
+	Uid       uint32 /* user ID of the file's owner */
+	Gid       uint32 /* group ID of the file's group */
+	_         int32
+	Rdev      uint64   /* device type */
+	Atime     Timespec /* time of last access */
+	Mtime     Timespec /* time of last data modification */
+	Ctime     Timespec /* time of last file status change */
+	Birthtime Timespec /* time of file creation */
+	Size      int      /* file size, in bytes */
+	Blocks    int      /* blocks allocated for file */
+	Blksize   int32    /* optimal blocksize for I/O */
+	Flags     uint32   /* user defined flags for file */
+	Gen       uint64   /* file generation number */
+	_         [10]int
+}
+
 type Request struct {
 	Method string
 	Path   string
 	Query  string
+}
+
+type Tweet struct {
+	Ctime int
+	Text  []byte
 }
 
 const (
@@ -70,7 +98,14 @@ const (
 	NOTE_WRITE   = 0x0002
 
 	/* From <errno.h>. */
-	EINTR = 4
+	ENOENT = 2
+	EINTR  = 4
+)
+
+const (
+	ResponseOK         = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n"
+	ResponseBadRequest = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n<!DOCTYPE html><head><title>400 Bad Request</title></head><body><h1>400 Bad Request</h1><p>Your browser sent a request that this server could not understand.</p></body></html>"
+	ResponseNotFound   = "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n<!DOCTYPE html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1><p>The requested URL was not found on this server.</p></body></html>"
 )
 
 var (
@@ -79,6 +114,8 @@ var (
 
 	IndexPage *[]byte
 	TweetPage *[]byte
+
+	Tweets []Tweet
 )
 
 func Fatal(msg string, code int32) {
@@ -116,26 +153,80 @@ func WriteFull(fd int32, buf []byte) int {
 	return len(buf)
 }
 
-func IndexPageHandler(c int32, _ *Request) {
+func IndexPageHandler(c int32, r *Request) {
+	var buffer [100]byte
+
+	if r.Query != "" {
+		WriteFull(c, []byte(r.Query))
+	}
+
+	const tweetBeforeID = `<div class="tweet"><a href="/tweet/`
+	const tweetBeforeDate = `"><div class="tweet-insides"><img class="tweet-avatar" src="https://media.licdn.com/dms/image/C4E03AQGi1v1OmgpUTQ/profile-displayphoto-shrink_800_800/0/1600259320098?e=1701302400&v=beta&t=SohoOoRvVqYuyUE7QnPQWYb-8Tm-Yc6ZUA75Wd_s2-4" alt="Profile picture"><div><div class="tweet-header"><b>Anton Pavlovskii</b><span>@anton2920 `
+	const tweetBeforeText = `</span></div><p>`
+	const tweetAfterText = `</p></div></div></a></div>`
+	const finisher = `</body></html>`
+
+	WriteFull(c, []byte(ResponseOK))
 	WriteFull(c, *IndexPage)
+	for i := len(Tweets) - 1; i >= 0; i-- {
+		tweet := Tweets[i]
+
+		ndigits := SlicePutInt(unsafe.Slice(&buffer[0], len(buffer)), i)
+
+		WriteFull(c, []byte(tweetBeforeID))
+		WriteFull(c, unsafe.Slice(&buffer[0], ndigits))
+		WriteFull(c, []byte(tweetBeforeDate))
+		/* TODO(anton2920): insert date. */
+		WriteFull(c, []byte(tweetBeforeText))
+		WriteFull(c, tweet.Text)
+		WriteFull(c, []byte(tweetAfterText))
+	}
+	WriteFull(c, []byte(finisher))
+}
+
+func StrToInt(xs string) (int, bool) {
+	var sign bool = true
+	var ret int
+
+	for _, x := range xs {
+		if x == '-' {
+			sign = false
+		} else if (x < '0') || (x > '9') {
+			return 0, false
+		}
+		ret = (ret * 10) + int(x-'0')
+	}
+
+	if !sign {
+		ret = -ret
+	}
+
+	return ret, true
 }
 
 func TweetPageHandler(c int32, r *Request) {
-	WriteFull(c, []byte(*TweetPage))
-}
+	const tweetBeforeDate = `<div class="tweet"><div class="tweet-insides"><img class="tweet-avatar" src="https://media.licdn.com/dms/image/C4E03AQGi1v1OmgpUTQ/profile-displayphoto-shrink_800_800/0/1600259320098?e=1701302400&v=beta&t=SohoOoRvVqYuyUE7QnPQWYb-8Tm-Yc6ZUA75Wd_s2-4" alt="Profile picture"><div><div class="tweet-header"><b>Anton Pavlovskii</b><span>@anton2920 `
+	const tweetBeforeText = `</span></div><p>`
+	const finisher = `</p></div></div></div></body></html>`
 
-func SearchPageHandler(c int32, r *Request) {
-	WriteFull(c, []byte(r.Query[:len(r.Query)]))
+	id, ok := StrToInt(r.Path[len("/tweet/"):])
+	if (!ok) || (id < 0) || (id > len(Tweets)-1) {
+		WriteFull(c, []byte(ResponseNotFound))
+		return
+	}
+	tweet := Tweets[id]
+
+	WriteFull(c, []byte(ResponseOK))
+	WriteFull(c, *TweetPage)
+	WriteFull(c, []byte(tweetBeforeDate))
+	/* TODO(anton2920): insert date. */
+	WriteFull(c, []byte(tweetBeforeText))
+	WriteFull(c, tweet.Text)
+	WriteFull(c, []byte(finisher))
 }
 
 func HandleConn(c int32) {
-	const responseOK = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n"
-	const responseBadRequest = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n<!DOCTYPE html><head><title>400 Bad Request</title></head><body><h1>400 Bad Request</h1><p>Your browser sent a request that this server could not understand.</p></body></html>"
-	const responseNotFound = "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n<!DOCTYPE html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1><p>The requested URL was not found on this server.</p></body></html>"
-
-	var buffer [2048]byte
-
-	/* NOTE(anton2920): browser must send its request first, but I don't really care about it at this point, so block until it's received. */
+	var buffer [512]byte
 	Read(c, unsafe.Slice(&buffer[0], len(buffer)))
 
 	var r Request
@@ -159,25 +250,20 @@ func HandleConn(c int32) {
 			r.Path = unsafe.String(&requestLine[0], pathEnd)
 		}
 	} else {
-		WriteFull(c, []byte(responseBadRequest))
+		WriteFull(c, []byte(ResponseBadRequest))
 		Close(c)
 		return
 	}
 	/* println(r.Method, len(r.Method), r.Path, len(r.Path), r.Query, len(r.Query)) */
 
 	if r.Path == "/" {
-		WriteFull(c, []byte(responseOK))
 		IndexPageHandler(c, &r)
 	} else if (len(r.Path) == len("/favicon.ico")) && (r.Path == "/favicon.ico") {
-
-	} else if (len(r.Path) == len("/tweet")) && (r.Path == "/tweet") {
-		WriteFull(c, []byte(responseOK))
+		/* Do nothing :) */
+	} else if (len(r.Path) > len("/tweet/")) && (r.Path[:len("/tweet/")] == "/tweet/") {
 		TweetPageHandler(c, &r)
-	} else if (len(r.Path) == len("/search")) && (r.Path == "/search") {
-		WriteFull(c, []byte(responseOK))
-		SearchPageHandler(c, &r)
 	} else {
-		WriteFull(c, []byte(responseNotFound))
+		WriteFull(c, []byte(ResponseNotFound))
 	}
 	Shutdown(c, SHUT_WR)
 	Close(c)
@@ -250,6 +336,65 @@ func MonitorPages() {
 	}
 }
 
+func SlicePutInt(buf []byte, x int) int {
+	var sign bool
+	var rx int
+
+	if x == 0 {
+		buf[0] = '0'
+		return 1
+	}
+
+	sign = (x > 0)
+
+	for x > 0 {
+		rx = (10 * rx) + (x % 10)
+		x /= 10
+	}
+
+	var i int
+	if !sign {
+		buf[i] = '-'
+		i++
+	}
+	for ; rx > 0; i++ {
+		buf[i] = byte((rx % 10) + '0')
+		rx /= 10
+	}
+	return i
+}
+
+func ReadTweets() {
+	const tweetsPath = "tweets/"
+
+	var buffer [PATH_MAX]byte
+	var fd int32
+	var st Stat
+
+	copy(buffer[:], []byte(tweetsPath))
+
+	var tweet Tweet
+	for i := 0; ; i++ {
+		SlicePutInt(buffer[len(tweetsPath):], i)
+
+		if fd = Open(unsafe.String(&buffer[0], len(buffer)), O_RDONLY, 0); fd < 0 {
+			if -fd != ENOENT {
+				Fatal("Failed to open '"+string(buffer[:])+"': ", fd)
+			}
+			return
+		}
+		if ret := Fstat(fd, &st); ret < 0 {
+			Fatal("Failed to get stat of '"+string(buffer[:])+"': ", ret)
+		}
+
+		tweet.Ctime = st.Ctime.Sec
+		tweet.Text = ReadEntireFile(fd)
+		Close(fd)
+
+		Tweets = append(Tweets, tweet)
+	}
+}
+
 func SwapBytesInWord(x uint16) uint16 {
 	return ((x << 8) & 0xFF00) | (x >> 8)
 }
@@ -262,6 +407,8 @@ func main() {
 	IndexPage = ReadPage("pages/index.html")
 	TweetPage = ReadPage("pages/tweet.html")
 	go MonitorPages()
+
+	ReadTweets()
 
 	if l = Socket(PF_INET, SOCK_STREAM, 0); l < 0 {
 		Fatal("Failed to create socket: ", l)
