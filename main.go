@@ -34,6 +34,12 @@ type Timespec struct {
 	Sec, Nsec int
 }
 
+type Request struct {
+	Method string
+	Path   string
+	Query  string
+}
+
 const (
 	/* From <sys/socket.h>. */
 	AF_INET = 2
@@ -72,6 +78,7 @@ var (
 	PageKevents []Kevent_t
 
 	IndexPage *[]byte
+	TweetPage *[]byte
 )
 
 func Fatal(msg string, code int32) {
@@ -109,15 +116,69 @@ func WriteFull(fd int32, buf []byte) int {
 	return len(buf)
 }
 
+func IndexPageHandler(c int32, _ *Request) {
+	WriteFull(c, *IndexPage)
+}
+
+func TweetPageHandler(c int32, r *Request) {
+	WriteFull(c, []byte(*TweetPage))
+}
+
+func SearchPageHandler(c int32, r *Request) {
+	WriteFull(c, []byte(r.Query[:len(r.Query)]))
+}
+
 func HandleConn(c int32) {
-	var buffer [1024]byte
+	const responseOK = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n"
+	const responseBadRequest = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n<!DOCTYPE html><head><title>400 Bad Request</title></head><body><h1>400 Bad Request</h1><p>Your browser sent a request that this server could not understand.</p></body></html>"
+	const responseNotFound = "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n<!DOCTYPE html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1><p>The requested URL was not found on this server.</p></body></html>"
+
+	var buffer [2048]byte
 
 	/* NOTE(anton2920): browser must send its request first, but I don't really care about it at this point, so block until it's received. */
-	Read(c, buffer[:])
+	Read(c, unsafe.Slice(&buffer[0], len(buffer)))
 
-	const headers = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n"
-	WriteFull(c, []byte(headers))
-	WriteFull(c, *IndexPage)
+	var r Request
+	if unsafe.String(&buffer[0], 3) == "GET" {
+		r.Method = "GET"
+
+		lineEnd := FindRune(unsafe.String(&buffer[len(r.Method)+1], len(buffer)-len(r.Method)+1), '\r')
+		requestLine := unsafe.Slice(&buffer[len(r.Method)+1], lineEnd-1) /* without method. */
+
+		pathEnd := FindRune(unsafe.String(&requestLine[0], len(requestLine)), '?')
+		if pathEnd != -1 {
+			/* With query. */
+			r.Path = unsafe.String(&requestLine[0], pathEnd)
+
+			queryStart := pathEnd + 1
+			queryEnd := FindRune(unsafe.String(&requestLine[queryStart], len(requestLine)-queryStart), ' ')
+			r.Query = unsafe.String(&requestLine[queryStart], queryEnd)
+		} else {
+			/* No query. */
+			pathEnd = FindRune(unsafe.String(&requestLine[0], len(requestLine)), ' ')
+			r.Path = unsafe.String(&requestLine[0], pathEnd)
+		}
+	} else {
+		WriteFull(c, []byte(responseBadRequest))
+		Close(c)
+		return
+	}
+	/* println(r.Method, len(r.Method), r.Path, len(r.Path), r.Query, len(r.Query)) */
+
+	if r.Path == "/" {
+		WriteFull(c, []byte(responseOK))
+		IndexPageHandler(c, &r)
+	} else if (len(r.Path) == len("/favicon.ico")) && (r.Path == "/favicon.ico") {
+
+	} else if (len(r.Path) == len("/tweet")) && (r.Path == "/tweet") {
+		WriteFull(c, []byte(responseOK))
+		TweetPageHandler(c, &r)
+	} else if (len(r.Path) == len("/search")) && (r.Path == "/search") {
+		WriteFull(c, []byte(responseOK))
+		SearchPageHandler(c, &r)
+	} else {
+		WriteFull(c, []byte(responseNotFound))
+	}
 	Shutdown(c, SHUT_WR)
 	Close(c)
 }
@@ -199,6 +260,7 @@ func main() {
 	var ret, l int32
 
 	IndexPage = ReadPage("pages/index.html")
+	TweetPage = ReadPage("pages/tweet.html")
 	go MonitorPages()
 
 	if l = Socket(PF_INET, SOCK_STREAM, 0); l < 0 {
