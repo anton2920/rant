@@ -75,7 +75,7 @@ var (
 )
 
 func Fatal(msg string, code int32) {
-	println(msg, -code)
+	println(msg, code)
 	Exit(1)
 }
 
@@ -185,7 +185,7 @@ func MonitorPages() {
 		}
 
 		/* NOTE(anton2920): sleep to prevent runaway events. */
-		SleepFull(Timespec{Nsec: 100000000})
+		SleepFull(Timespec{Nsec: 200000000})
 	}
 }
 
