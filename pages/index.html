@@ -54,11 +54,26 @@
 			margin-top: 5px;
 		}
 	</style>
+
+	<script>
+		function OnQueryChange() {
+			var query = document.getElementById("query");
+			var tweets = document.getElementsByClassName("tweet");
+			var tweetTexts = document.getElementsByTagName("p");
+			for (var i = 0; i < tweets.length; ++i) {
+				if ((query.value.length == 0) || (tweetTexts[i].innerHTML.includes(query.value))) {
+					tweets[i].style.display = "";
+				} else {
+					tweets[i].style.display = "none";
+				}
+			}
+		}
+	</script>
 </head>
 <body>
 	<div class="search">
 		<form method="GET" action="/">
-			<input style="width: 476px" type="text" name="Query">
+			<input id="query" style="width: 476px" oninput="OnQueryChange()" type="text" name="Query">
 
 			<input style="width: 60px" type="submit" value="Search">
 		</form>
