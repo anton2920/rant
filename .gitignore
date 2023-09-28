@@ -2,3 +2,5 @@
 build/
 rant
 rant.s
+rant.sh
+restart_rant
