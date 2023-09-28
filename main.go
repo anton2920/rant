@@ -1,8 +1,6 @@
 package main
 
-import (
-	"unsafe"
-)
+import "unsafe"
 
 type SockAddrIn struct {
 	Len    uint8
@@ -114,7 +112,7 @@ const (
 
 const (
 	ResponseOK         = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n"
-	ResponsePhotoOK    = "HTTP/1.1 200 OK\r\nContent-Type: image/jpg\r\nConnection: close\r\n\r\n"
+	ResponsePhotoOK    = "HTTP/1.1 200 OK\r\nContent-Type: image/jpg\r\nCache-Control: max-age=604800\r\nConnection: close\r\n\r\n"
 	ResponseBadRequest = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n<!DOCTYPE html><head><title>400 Bad Request</title></head><body><h1>400 Bad Request</h1><p>Your browser sent a request that this server could not understand.</p></body></html>"
 	ResponseNotFound   = "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n<!DOCTYPE html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1><p>The requested URL was not found on this server.</p></body></html>"
 	ResponseFinisher   = "</div></div></div></body></html>"
@@ -613,7 +611,7 @@ func ReadTweets() {
 
 func ConstructIndexPage() {
 	var totalLen int
-	
+
 	totalLen += len(*IndexPage)
 	for _, tweet := range TweetHTMLs {
 		totalLen += len(tweet)
