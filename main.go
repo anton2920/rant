@@ -606,7 +606,7 @@ func ReadTweets() {
 }
 
 func ConstructIndexPage() {
-	IndexPageFull = make([]byte, 0, 2<<20)
+	IndexPageFull = make([]byte, 0, 4<<10)
 
 	IndexPageFull = append(IndexPageFull, *IndexPage...)
 	for i := len(TweetHTMLs) - 1; i >= 0; i-- {
@@ -645,7 +645,7 @@ func MonitorTweets() {
 		}
 
 		/* NOTE(anton2920): sleep to prevent runaway events. */
-		SleepFull(Timespec{Sec: 1})
+		SleepFull(Timespec{Nsec: 200000000})
 	}
 }
 
@@ -660,10 +660,11 @@ func main() {
 
 	IndexPage = ReadPage("pages/index.html")
 	TweetPage = ReadPage("pages/tweet.html")
-	go MonitorPages()
 
 	ReadTweets()
 	ConstructIndexPage()
+
+	go MonitorPages()
 	go MonitorTweets()
 
 	if l = Socket(PF_INET, SOCK_STREAM, 0); l < 0 {
