@@ -1,12 +1,10 @@
 #!/bin/sh
 
-LAST=`ls | grep [0-9]* | sort -r | sed 1q`
+LAST=`ls | grep -E '[0-9]+' | sort -r | sed 1q`
 NEXT=`bc -e "$LAST + 1"`
 
 ed $NEXT
 
 if test -f $NEXT; then
-	git add $NEXT
-	git commit -m "Added tweet #$NEXT"
-	git push
+	git add $NEXT && git commit -m "Added tweet #$NEXT" && git push
 fi
