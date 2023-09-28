@@ -114,6 +114,7 @@ const (
 
 const (
 	ResponseOK         = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n"
+	ResponsePhotoOK    = "HTTP/1.1 200 OK\r\nContent-Type: image/jpg\r\nConnection: close\r\n\r\n"
 	ResponseBadRequest = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n<!DOCTYPE html><head><title>400 Bad Request</title></head><body><h1>400 Bad Request</h1><p>Your browser sent a request that this server could not understand.</p></body></html>"
 	ResponseNotFound   = "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n<!DOCTYPE html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1><p>The requested URL was not found on this server.</p></body></html>"
 	ResponseFinisher   = "</div></div></div></body></html>"
@@ -125,6 +126,7 @@ var (
 
 	IndexPage *[]byte
 	TweetPage *[]byte
+	Photo     *[]byte
 
 	TweetHTMLs [][]byte
 	TweetTexts [][]byte
@@ -447,6 +449,9 @@ func HandleConn(c int32) {
 
 	if r.Path == "/" {
 		IndexPageHandler(c, &r)
+	} else if (len(r.Path) == len("/photo.jpg")) && (r.Path == "/photo.jpg") {
+		WriteFull(c, []byte(ResponsePhotoOK))
+		WriteFull(c, *Photo)
 	} else if (len(r.Path) == len("/favicon.ico")) && (r.Path == "/favicon.ico") {
 		/* Do nothing :) */
 	} else if (len(r.Path) > len("/tweet/")) && (r.Path[:len("/tweet/")] == "/tweet/") {
@@ -552,7 +557,7 @@ func SlicePutPositiveInt(buf []byte, x int) int {
 func ReadTweets() {
 	const tweetsPath = "tweets/"
 
-	const tweetBeforeDate = `<div class="tweet"><div class="tweet-insides"><img class="tweet-avatar" src="https://media.licdn.com/dms/image/C4E03AQGi1v1OmgpUTQ/profile-displayphoto-shrink_800_800/0/1600259320098?e=1701302400&v=beta&t=SohoOoRvVqYuyUE7QnPQWYb-8Tm-Yc6ZUA75Wd_s2-4" alt="Profile picture"><div><div class="tweet-header"><a href="/"><b>Anton Pavlovskii</b><span>@anton2920 `
+	const tweetBeforeDate = `<div class="tweet"><div class="tweet-insides"><img class="tweet-avatar" src="/photo.jpg" alt="Profile picture"><div><div class="tweet-header"><a href="/"><b>Anton Pavlovskii</b><span>@anton2920 `
 	const tweetBeforeID = `</span></a></div><a href="/tweet/`
 	const tweetBeforeText = `"><p>`
 	const tweetAfterText = `</p></div></div></a></div>`
@@ -660,6 +665,7 @@ func main() {
 
 	IndexPage = ReadPage("pages/index.html")
 	TweetPage = ReadPage("pages/tweet.html")
+	Photo = ReadPage("pages/photo.jpg")
 
 	ReadTweets()
 	ConstructIndexPage()
