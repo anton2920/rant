@@ -128,6 +128,8 @@ var (
 
 	TweetHTMLs [][]byte
 	TweetTexts [][]byte
+
+	IndexPageFull []byte
 )
 
 func Fatal(msg string, code int32) {
@@ -381,10 +383,7 @@ func IndexPageHandler(c int32, r *Request) {
 		}
 	} else {
 		WriteFull(c, []byte(ResponseOK))
-		WriteFull(c, *IndexPage)
-		for i := len(TweetHTMLs) - 1; i >= 0; i-- {
-			WriteFull(c, TweetHTMLs[i])
-		}
+		WriteFull(c, IndexPageFull)
 	}
 	WriteFull(c, []byte(ResponseFinisher))
 }
@@ -550,7 +549,7 @@ func SlicePutPositiveInt(buf []byte, x int) int {
 	return i
 }
 
-func ReadTweetHTMLs() {
+func ReadTweets() {
 	const tweetsPath = "tweets/"
 
 	const tweetBeforeDate = `<div class="tweet"><div class="tweet-insides"><img class="tweet-avatar" src="https://media.licdn.com/dms/image/C4E03AQGi1v1OmgpUTQ/profile-displayphoto-shrink_800_800/0/1600259320098?e=1701302400&v=beta&t=SohoOoRvVqYuyUE7QnPQWYb-8Tm-Yc6ZUA75Wd_s2-4" alt="Profile picture"><div><div class="tweet-header"><a href="/"><b>Anton Pavlovskii</b><span>@anton2920 `
@@ -606,7 +605,16 @@ func ReadTweetHTMLs() {
 	}
 }
 
-func MonitorTweetHTMLs() {
+func ConstructIndexPage() {
+	IndexPageFull = make([]byte, 0, 2<<20)
+
+	IndexPageFull = append(IndexPageFull, *IndexPage...)
+	for i := len(TweetHTMLs) - 1; i >= 0; i-- {
+		IndexPageFull = append(IndexPageFull, TweetHTMLs[i]...)
+	}
+}
+
+func MonitorTweets() {
 	var fd, kq, nevents int32
 
 	if kq = Kqueue(); kq < 0 {
@@ -632,7 +640,8 @@ func MonitorTweetHTMLs() {
 			continue
 		} else if nevents > 0 {
 			println("INFO: change in tweets directory. Reloading...")
-			ReadTweetHTMLs()
+			ReadTweets()
+			ConstructIndexPage()
 		}
 
 		/* NOTE(anton2920): sleep to prevent runaway events. */
@@ -653,8 +662,9 @@ func main() {
 	TweetPage = ReadPage("pages/tweet.html")
 	go MonitorPages()
 
-	ReadTweetHTMLs()
-	go MonitorTweetHTMLs()
+	ReadTweets()
+	ConstructIndexPage()
+	go MonitorTweets()
 
 	if l = Socket(PF_INET, SOCK_STREAM, 0); l < 0 {
 		Fatal("Failed to create socket: ", l)
