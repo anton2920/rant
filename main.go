@@ -575,11 +575,11 @@ func ReadTweets() {
 
 	copy(unsafe.Slice(&pathBuf[0], len(pathBuf)), []byte(tweetsPath))
 
-	TweetHTMLs = make([][]byte, 0, 128)
-	TweetTexts = make([][]byte, 0, 128)
+	TweetHTMLs = make([][]byte, 0, 1)
+	TweetTexts = make([][]byte, 0, 1)
 
 	for i := 0; ; i++ {
-		tweet := make([]byte, 0, 2048)
+		tweet := make([]byte, 0, 256)
 
 		idBufLen = SlicePutPositiveInt(unsafe.Slice(&idBuf[0], len(idBuf)), i)
 		copy(unsafe.Slice(&pathBuf[len(tweetsPath)], len(pathBuf)-len(tweetsPath)), unsafe.Slice(&idBuf[0], idBufLen))
@@ -612,8 +612,14 @@ func ReadTweets() {
 }
 
 func ConstructIndexPage() {
-	IndexPageFull = make([]byte, 0, 4<<10)
+	var totalLen int
+	
+	totalLen += len(*IndexPage)
+	for _, tweet := range TweetHTMLs {
+		totalLen += len(tweet)
+	}
 
+	IndexPageFull = make([]byte, 0, totalLen)
 	IndexPageFull = append(IndexPageFull, *IndexPage...)
 	for i := len(TweetHTMLs) - 1; i >= 0; i-- {
 		IndexPageFull = append(IndexPageFull, TweetHTMLs[i]...)
