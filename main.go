@@ -126,7 +126,8 @@ var (
 	IndexPage *[]byte
 	TweetPage *[]byte
 
-	Tweets [][]byte
+	TweetHTMLs [][]byte
+	TweetTexts [][]byte
 )
 
 func Fatal(msg string, code int32) {
@@ -293,18 +294,97 @@ func SlicePutTm(buf []byte, tm Tm) int {
 	}
 	ndigits = SlicePutPositiveInt(buf[n:], tm.Sec)
 	n += ndigits
+	buf[n] = ' '
+	n++
 
-	return n
+	buf[n] = 'M'
+	buf[n+1] = 'S'
+	buf[n+2] = 'K'
+
+	return n + 3
+}
+
+/* CharToByte returns ASCII-decoded character. For example, 'A' yields '\x0A'. */
+func CharToByte(c byte) (byte, bool) {
+	if c >= '0' && c <= '9' {
+		return c - '0', true
+	} else if c >= 'A' && c <= 'F' {
+		return 10 + c - 'A', true
+	} else {
+		return '\x00', false
+	}
+}
+
+func URLDecode(decoded []byte, encoded string) (int, bool) {
+	var hi, lo byte
+	var ok bool
+	var n int
+
+	for i := 0; i < len(encoded); i++ {
+		if encoded[i] == '%' {
+			hi = encoded[i+1]
+			hi, ok = CharToByte(hi)
+			if !ok {
+				return 0, false
+			}
+
+			lo = encoded[i+2]
+			lo, ok = CharToByte(lo)
+			if !ok {
+				return 0, false
+			}
+
+			decoded[n] = byte(hi<<4 | lo)
+			i += 2
+		} else if encoded[i] == '+' {
+			decoded[n] = ' '
+		} else {
+			decoded[n] = encoded[i]
+		}
+		n++
+	}
+	return n, true
 }
 
 func IndexPageHandler(c int32, r *Request) {
-	WriteFull(c, []byte(ResponseOK))
+	const maxQueryLen = 1024
+	var queryString string
+
 	if r.Query != "" {
-		WriteFull(c, []byte(r.Query))
+		if r.Query[:len("Query=")] != "Query=" {
+			WriteFull(c, []byte(ResponseBadRequest))
+			return
+		}
+
+		queryString = r.Query[len("Query="):]
+		if len(queryString) > maxQueryLen {
+			WriteFull(c, []byte(ResponseBadRequest))
+			return
+		}
 	}
-	WriteFull(c, *IndexPage)
-	for i := len(Tweets) - 1; i >= 0; i-- {
-		WriteFull(c, Tweets[i])
+
+	if queryString != "" {
+		var decodedQuery [maxQueryLen]byte
+		decodedLen, ok := URLDecode(unsafe.Slice(&decodedQuery[0], len(decodedQuery)), queryString)
+		if !ok {
+			WriteFull(c, []byte(ResponseBadRequest))
+			return
+		}
+
+		WriteFull(c, []byte(ResponseOK))
+		WriteFull(c, *IndexPage)
+		/* WriteFull(c, unsafe.Slice(&decodedQuery[0], decodedLen)) */
+		for i := len(TweetHTMLs) - 1; i >= 0; i-- {
+			if FindSubstring(unsafe.String(unsafe.SliceData(TweetTexts[i]), len(TweetTexts[i])), unsafe.String(&decodedQuery[0], decodedLen)) != -1 {
+				WriteFull(c, TweetHTMLs[i])
+			}
+		}
+	} else {
+		WriteFull(c, []byte(ResponseOK))
+		WriteFull(c, *IndexPage)
+		for i := len(TweetHTMLs) - 1; i >= 0; i-- {
+			WriteFull(c, TweetHTMLs[i])
+		}
 	}
 	WriteFull(c, []byte(ResponseFinisher))
 }
@@ -324,14 +404,14 @@ func StrToPositiveInt(xs string) (int, bool) {
 
 func TweetPageHandler(c int32, r *Request) {
 	id, ok := StrToPositiveInt(r.Path[len("/tweet/"):])
-	if (!ok) || (id < 0) || (id > len(Tweets)-1) {
+	if (!ok) || (id < 0) || (id > len(TweetHTMLs)-1) {
 		WriteFull(c, []byte(ResponseNotFound))
 		return
 	}
 
 	WriteFull(c, []byte(ResponseOK))
 	WriteFull(c, *TweetPage)
-	WriteFull(c, Tweets[id])
+	WriteFull(c, TweetHTMLs[id])
 	WriteFull(c, []byte(ResponseFinisher))
 }
 
@@ -470,7 +550,7 @@ func SlicePutPositiveInt(buf []byte, x int) int {
 	return i
 }
 
-func ReadTweets() {
+func ReadTweetHTMLs() {
 	const tweetsPath = "tweets/"
 
 	const tweetBeforeDate = `<div class="tweet"><div class="tweet-insides"><img class="tweet-avatar" src="https://media.licdn.com/dms/image/C4E03AQGi1v1OmgpUTQ/profile-displayphoto-shrink_800_800/0/1600259320098?e=1701302400&v=beta&t=SohoOoRvVqYuyUE7QnPQWYb-8Tm-Yc6ZUA75Wd_s2-4" alt="Profile picture"><div><div class="tweet-header"><a href="/"><b>Anton Pavlovskii</b><span>@anton2920 `
@@ -491,6 +571,8 @@ func ReadTweets() {
 
 	copy(unsafe.Slice(&pathBuf[0], len(pathBuf)), []byte(tweetsPath))
 
+	TweetHTMLs = make([][]byte, 0, 128)
+
 	for i := 0; ; i++ {
 		tweet := make([]byte, 0, 2048)
 
@@ -509,6 +591,7 @@ func ReadTweets() {
 		dateBufLen = SlicePutTm(unsafe.Slice(&dateBuf[0], len(dateBuf)), TimeToTm(st.Birthtime.Sec))
 
 		text := ReadEntireFile(fd)
+		TweetTexts = append(TweetTexts, text)
 		Close(fd)
 
 		tweet = append(tweet, tweetBeforeDate...)
@@ -519,7 +602,41 @@ func ReadTweets() {
 		tweet = append(tweet, text...)
 		tweet = append(tweet, tweetAfterText...)
 
-		Tweets = append(Tweets, tweet)
+		TweetHTMLs = append(TweetHTMLs, tweet)
+	}
+}
+
+func MonitorTweetHTMLs() {
+	var fd, kq, nevents int32
+
+	if kq = Kqueue(); kq < 0 {
+		Fatal("Failed to open a kernel queue: ", kq)
+	}
+
+	const tweetsDir = "./tweets\x00"
+	if fd = Open(tweetsDir, O_RDONLY, 0); fd < 0 {
+		Fatal("Failed to open '"+tweetsDir+"': ", fd)
+	}
+
+	tweetsKevent := Kevent_t{Ident: uintptr(fd), Filter: EVFILT_VNODE, Flags: EV_ADD | EV_CLEAR, Fflags: NOTE_WRITE}
+	if nevents = Kevent(kq, unsafe.Slice(&tweetsKevent, 1), nil, nil); nevents < 0 {
+		Fatal("Failed to register kernel events: ", nevents)
+	}
+
+	var event Kevent_t
+	for {
+		if nevents = Kevent(kq, nil, unsafe.Slice(&event, 1), nil); nevents < 0 {
+			if -nevents != EINTR {
+				println("ERROR: failed to get kernel events: ", nevents)
+			}
+			continue
+		} else if nevents > 0 {
+			println("INFO: change in tweets directory. Reloading...")
+			ReadTweetHTMLs()
+		}
+
+		/* NOTE(anton2920): sleep to prevent runaway events. */
+		SleepFull(Timespec{Sec: 1})
 	}
 }
 
@@ -536,7 +653,8 @@ func main() {
 	TweetPage = ReadPage("pages/tweet.html")
 	go MonitorPages()
 
-	ReadTweets()
+	ReadTweetHTMLs()
+	go MonitorTweetHTMLs()
 
 	if l = Socket(PF_INET, SOCK_STREAM, 0); l < 0 {
 		Fatal("Failed to create socket: ", l)
