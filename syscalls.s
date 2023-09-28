@@ -2,7 +2,7 @@
 
 #include "go_asm.h"
 #include "textflag.h"
-#include "syscall.h"
+#include "sys/syscall.h"
 
 /* func Accept(s int32, addr *SockAddr, addrlen *uint32) int32 */
 TEXT main·Accept(SB), NOSPLIT, $0-20
@@ -55,19 +55,6 @@ TEXT main·Fstat(SB), NOSPLIT, $0-12
 	JCC 2(PC)
 	NEGL AX
 	MOVL AX, ret+16(FP)
-	RET
-
-/* func Getdirentries(fd int32, buf []byte) int */
-TEXT main·Getdirentries(SB), NOSPLIT, $0-28
-	MOVQ $SYS_getdirentries, AX
-	MOVL fd+0(FP), DI
-	MOVQ buf+8(FP), SI
-	MOVQ n+16(FP), DX
-	MOVQ $0x0, R10
-	SYSCALL
-	JCC 2(PC)
-	NEGQ AX
-	MOVQ AX, ret+32(FP)
 	RET
 
 /* func Kevent(kq int32, changelist []Kevent, eventlist []Kevent, timeout *Timespec) */

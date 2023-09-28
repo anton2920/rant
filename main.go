@@ -1,6 +1,8 @@
 package main
 
-import "unsafe"
+import (
+	"unsafe"
+)
 
 type SockAddrIn struct {
 	Len    uint8
@@ -57,15 +59,23 @@ type Stat struct {
 	_         [10]int
 }
 
+/* See <time.h>. */
+type Tm struct {
+	Sec   int /* seconds after the minute [0-60] */
+	Min   int /* minutes after the hour [0-59] */
+	Hour  int /* hours since midnight [0-23] */
+	Mday  int /* day of the month [1-31] */
+	Mon   int /* months since January [0-11] */
+	Year  int /* years since 1900 */
+	Wday  int /* days since Sunday [0-6] */
+	Yday  int /* days since January 1 [0-365] */
+	Isdst int /* Daylight Savings Time flag */
+}
+
 type Request struct {
 	Method string
 	Path   string
 	Query  string
-}
-
-type Tweet struct {
-	Ctime int
-	Text  []byte
 }
 
 const (
@@ -106,6 +116,7 @@ const (
 	ResponseOK         = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n"
 	ResponseBadRequest = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n<!DOCTYPE html><head><title>400 Bad Request</title></head><body><h1>400 Bad Request</h1><p>Your browser sent a request that this server could not understand.</p></body></html>"
 	ResponseNotFound   = "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n<!DOCTYPE html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1><p>The requested URL was not found on this server.</p></body></html>"
+	ResponseFinisher   = "</p></a></div></div></div></body></html>"
 )
 
 var (
@@ -115,7 +126,7 @@ var (
 	IndexPage *[]byte
 	TweetPage *[]byte
 
-	Tweets []Tweet
+	Tweets [][]byte
 )
 
 func Fatal(msg string, code int32) {
@@ -153,76 +164,175 @@ func WriteFull(fd int32, buf []byte) int {
 	return len(buf)
 }
 
-func IndexPageHandler(c int32, r *Request) {
-	var buffer [100]byte
+func TimeToTm(t int) Tm {
+	var tm Tm
 
+	daysSinceJan1st := [2][13]int{
+		{0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334, 365}, // 365 days, non-leap
+		{0, 31, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335, 366}, // 366 days, leap
+	}
+
+	t += 3 * 60 * 60 /* MSK timezone hack. */
+
+	/* Re-bias from 1970 to 1601: 1970 - 1601 = 369 = 3*100 + 17*4 + 1 years (incl. 89 leap days) = (3*100*(365+24/100) + 17*4*(365+1/4) + 1*365)*24*3600 seconds. */
+	sec := t + 11644473600
+
+	wday := (sec/86400 + 1) % 7 /* day of week */
+
+	/* Remove multiples of 400 years (incl. 97 leap days). */
+	quadricentennials := sec / 12622780800 /* 400*365.2425*24*3600 .*/
+	sec %= 12622780800
+
+	/* Remove multiples of 100 years (incl. 24 leap days), can't be more than 3 (because multiples of 4*100=400 years (incl. leap days) have been removed). */
+	centennials := sec / 3155673600 /* 100*(365+24/100)*24*3600. */
+	if centennials > 3 {
+		centennials = 3
+	}
+	sec -= centennials * 3155673600
+
+	/* Remove multiples of 4 years (incl. 1 leap day), can't be more than 24 (because multiples of 25*4=100 years (incl. leap days) have been removed). */
+	quadrennials := sec / 126230400 /*  4*(365+1/4)*24*3600. */
+	if quadrennials > 24 {
+		quadrennials = 24
+	}
+	sec -= quadrennials * 126230400
+
+	/* Remove multiples of years (incl. 0 leap days), can't be more than 3 (because multiples of 4 years (incl. leap days) have been removed). */
+	annuals := sec / 31536000 // 365*24*3600
+	if annuals > 3 {
+		annuals = 3
+	}
+	sec -= annuals * 31536000
+
+	/* Calculate the year and find out if it's leap. */
+	year := 1601 + quadricentennials*400 + centennials*100 + quadrennials*4 + annuals
+	var leap int
+	if (year%4 == 0) && ((year%100 != 0) || (year%400 == 0)) {
+		leap = 1
+	} else {
+		leap = 0
+	}
+
+	/* Calculate the day of the year and the time. */
+	yday := sec / 86400
+	sec %= 86400
+	hour := sec / 3600
+	sec %= 3600
+	min := sec / 60
+	sec %= 60
+
+	/* Calculate the month. */
+	var month, mday int = 1, 1
+	for ; month < 13; month++ {
+		if yday < daysSinceJan1st[leap][month] {
+			mday += yday - daysSinceJan1st[leap][month-1]
+			break
+		}
+	}
+
+	tm.Sec = sec          /*  [0,59]. */
+	tm.Min = min          /*  [0,59]. */
+	tm.Hour = hour        /*  [0,23]. */
+	tm.Mday = mday        /*  [1,31]  (day of month). */
+	tm.Mon = month - 1    /*  [0,11]  (month). */
+	tm.Year = year - 1900 /*  70+     (year since 1900). */
+	tm.Wday = wday        /*  [0,6]   (day since Sunday AKA day of week). */
+	tm.Yday = yday        /*  [0,365] (day since January 1st AKA day of year). */
+	tm.Isdst = -1         /*  daylight saving time flag. */
+
+	return tm
+}
+
+func SlicePutTm(buf []byte, tm Tm) int {
+	var n, ndigits int
+
+	if tm.Mday+1 < 10 {
+		buf[n] = '0'
+		n++
+	}
+	ndigits = SlicePutPositiveInt(buf[n:], tm.Mday)
+	n += ndigits
+	buf[n] = '.'
+	n++
+
+	if tm.Mon+1 < 10 {
+		buf[n] = '0'
+		n++
+	}
+	ndigits = SlicePutPositiveInt(buf[n:], tm.Mon+1)
+	n += ndigits
+	buf[n] = '.'
+	n++
+
+	ndigits = SlicePutPositiveInt(buf[n:], tm.Year+1900)
+	n += ndigits
+	buf[n] = ' '
+	n++
+
+	if tm.Hour < 10 {
+		buf[n] = '0'
+		n++
+	}
+	ndigits = SlicePutPositiveInt(buf[n:], tm.Hour)
+	n += ndigits
+	buf[n] = ':'
+	n++
+
+	if tm.Min < 10 {
+		buf[n] = '0'
+		n++
+	}
+	ndigits = SlicePutPositiveInt(buf[n:], tm.Min)
+	n += ndigits
+	buf[n] = ':'
+	n++
+
+	if tm.Sec < 10 {
+		buf[n] = '0'
+		n++
+	}
+	ndigits = SlicePutPositiveInt(buf[n:], tm.Sec)
+	n += ndigits
+
+	return n
+}
+
+func IndexPageHandler(c int32, r *Request) {
+	WriteFull(c, []byte(ResponseOK))
 	if r.Query != "" {
 		WriteFull(c, []byte(r.Query))
 	}
-
-	const tweetBeforeID = `<div class="tweet"><a href="/tweet/`
-	const tweetBeforeDate = `"><div class="tweet-insides"><img class="tweet-avatar" src="https://media.licdn.com/dms/image/C4E03AQGi1v1OmgpUTQ/profile-displayphoto-shrink_800_800/0/1600259320098?e=1701302400&v=beta&t=SohoOoRvVqYuyUE7QnPQWYb-8Tm-Yc6ZUA75Wd_s2-4" alt="Profile picture"><div><div class="tweet-header"><b>Anton Pavlovskii</b><span>@anton2920 `
-	const tweetBeforeText = `</span></div><p>`
-	const tweetAfterText = `</p></div></div></a></div>`
-	const finisher = `</body></html>`
-
-	WriteFull(c, []byte(ResponseOK))
 	WriteFull(c, *IndexPage)
 	for i := len(Tweets) - 1; i >= 0; i-- {
-		tweet := Tweets[i]
-
-		ndigits := SlicePutInt(unsafe.Slice(&buffer[0], len(buffer)), i)
-
-		WriteFull(c, []byte(tweetBeforeID))
-		WriteFull(c, unsafe.Slice(&buffer[0], ndigits))
-		WriteFull(c, []byte(tweetBeforeDate))
-		/* TODO(anton2920): insert date. */
-		WriteFull(c, []byte(tweetBeforeText))
-		WriteFull(c, tweet.Text)
-		WriteFull(c, []byte(tweetAfterText))
+		WriteFull(c, Tweets[i])
 	}
-	WriteFull(c, []byte(finisher))
+	WriteFull(c, []byte(ResponseFinisher))
 }
 
-func StrToInt(xs string) (int, bool) {
-	var sign bool = true
+func StrToPositiveInt(xs string) (int, bool) {
 	var ret int
 
 	for _, x := range xs {
-		if x == '-' {
-			sign = false
-		} else if (x < '0') || (x > '9') {
+		if (x < '0') || (x > '9') {
 			return 0, false
 		}
 		ret = (ret * 10) + int(x-'0')
-	}
-
-	if !sign {
-		ret = -ret
 	}
 
 	return ret, true
 }
 
 func TweetPageHandler(c int32, r *Request) {
-	const tweetBeforeDate = `<div class="tweet"><div class="tweet-insides"><img class="tweet-avatar" src="https://media.licdn.com/dms/image/C4E03AQGi1v1OmgpUTQ/profile-displayphoto-shrink_800_800/0/1600259320098?e=1701302400&v=beta&t=SohoOoRvVqYuyUE7QnPQWYb-8Tm-Yc6ZUA75Wd_s2-4" alt="Profile picture"><div><div class="tweet-header"><b>Anton Pavlovskii</b><span>@anton2920 `
-	const tweetBeforeText = `</span></div><p>`
-	const finisher = `</p></div></div></div></body></html>`
-
-	id, ok := StrToInt(r.Path[len("/tweet/"):])
+	id, ok := StrToPositiveInt(r.Path[len("/tweet/"):])
 	if (!ok) || (id < 0) || (id > len(Tweets)-1) {
 		WriteFull(c, []byte(ResponseNotFound))
 		return
 	}
-	tweet := Tweets[id]
 
 	WriteFull(c, []byte(ResponseOK))
 	WriteFull(c, *TweetPage)
-	WriteFull(c, []byte(tweetBeforeDate))
-	/* TODO(anton2920): insert date. */
-	WriteFull(c, []byte(tweetBeforeText))
-	WriteFull(c, tweet.Text)
-	WriteFull(c, []byte(finisher))
+	WriteFull(c, Tweets[id])
+	WriteFull(c, []byte(ResponseFinisher))
 }
 
 func HandleConn(c int32) {
@@ -234,20 +344,20 @@ func HandleConn(c int32) {
 		r.Method = "GET"
 
 		lineEnd := FindRune(unsafe.String(&buffer[len(r.Method)+1], len(buffer)-len(r.Method)+1), '\r')
-		requestLine := unsafe.Slice(&buffer[len(r.Method)+1], lineEnd-1) /* without method. */
+		requestLine := unsafe.String(&buffer[len(r.Method)+1], lineEnd-1) /* without method. */
 
-		pathEnd := FindRune(unsafe.String(&requestLine[0], len(requestLine)), '?')
+		pathEnd := FindRune(requestLine, '?')
 		if pathEnd != -1 {
 			/* With query. */
-			r.Path = unsafe.String(&requestLine[0], pathEnd)
+			r.Path = unsafe.String(unsafe.StringData(requestLine), pathEnd)
 
 			queryStart := pathEnd + 1
-			queryEnd := FindRune(unsafe.String(&requestLine[queryStart], len(requestLine)-queryStart), ' ')
-			r.Query = unsafe.String(&requestLine[queryStart], queryEnd)
+			queryEnd := FindRune(unsafe.String((*byte)(unsafe.Add(unsafe.Pointer(unsafe.StringData(requestLine)), queryStart)), len(requestLine)-queryStart), ' ')
+			r.Query = unsafe.String((*byte)(unsafe.Add(unsafe.Pointer(unsafe.StringData(requestLine)), queryStart)), queryEnd)
 		} else {
 			/* No query. */
-			pathEnd = FindRune(unsafe.String(&requestLine[0], len(requestLine)), ' ')
-			r.Path = unsafe.String(&requestLine[0], pathEnd)
+			pathEnd = FindRune(requestLine, ' ')
+			r.Path = unsafe.String(unsafe.StringData(requestLine), pathEnd)
 		}
 	} else {
 		WriteFull(c, []byte(ResponseBadRequest))
@@ -336,8 +446,8 @@ func MonitorPages() {
 	}
 }
 
-func SlicePutInt(buf []byte, x int) int {
-	var sign bool
+func SlicePutPositiveInt(buf []byte, x int) int {
+	var ndigits int
 	var rx int
 
 	if x == 0 {
@@ -345,21 +455,17 @@ func SlicePutInt(buf []byte, x int) int {
 		return 1
 	}
 
-	sign = (x > 0)
-
 	for x > 0 {
 		rx = (10 * rx) + (x % 10)
 		x /= 10
+		ndigits++
 	}
 
 	var i int
-	if !sign {
-		buf[i] = '-'
-		i++
-	}
-	for ; rx > 0; i++ {
+	for i = 0; ndigits > 0; i++ {
 		buf[i] = byte((rx % 10) + '0')
 		rx /= 10
+		ndigits--
 	}
 	return i
 }
@@ -367,29 +473,51 @@ func SlicePutInt(buf []byte, x int) int {
 func ReadTweets() {
 	const tweetsPath = "tweets/"
 
-	var buffer [PATH_MAX]byte
+	const tweetBeforeDate = `<div class="tweet"><div class="tweet-insides"><img class="tweet-avatar" src="https://media.licdn.com/dms/image/C4E03AQGi1v1OmgpUTQ/profile-displayphoto-shrink_800_800/0/1600259320098?e=1701302400&v=beta&t=SohoOoRvVqYuyUE7QnPQWYb-8Tm-Yc6ZUA75Wd_s2-4" alt="Profile picture"><div><div class="tweet-header"><a href="/"><b>Anton Pavlovskii</b><span>@anton2920 `
+	const tweetBeforeID = `</span></a></div><a href="/tweet/`
+	const tweetBeforeText = `"><p>`
+	const tweetAfterText = `</p></div></div></a></div>`
+
+	var pathBuf [PATH_MAX]byte
+
+	var idBuf [10]byte
+	var idBufLen int
+
+	var dateBuf [25]byte
+	var dateBufLen int
+
 	var fd int32
 	var st Stat
 
-	copy(buffer[:], []byte(tweetsPath))
+	copy(unsafe.Slice(&pathBuf[0], len(pathBuf)), []byte(tweetsPath))
 
-	var tweet Tweet
 	for i := 0; ; i++ {
-		SlicePutInt(buffer[len(tweetsPath):], i)
+		tweet := make([]byte, 0, 2048)
 
-		if fd = Open(unsafe.String(&buffer[0], len(buffer)), O_RDONLY, 0); fd < 0 {
+		idBufLen = SlicePutPositiveInt(unsafe.Slice(&idBuf[0], len(idBuf)), i)
+		copy(unsafe.Slice(&pathBuf[len(tweetsPath)], len(pathBuf)-len(tweetsPath)), unsafe.Slice(&idBuf[0], idBufLen))
+
+		if fd = Open(unsafe.String(&pathBuf[0], len(pathBuf)), O_RDONLY, 0); fd < 0 {
 			if -fd != ENOENT {
-				Fatal("Failed to open '"+string(buffer[:])+"': ", fd)
+				Fatal("Failed to open '"+string(pathBuf[:])+"': ", fd)
 			}
 			return
 		}
 		if ret := Fstat(fd, &st); ret < 0 {
-			Fatal("Failed to get stat of '"+string(buffer[:])+"': ", ret)
+			Fatal("Failed to get stat of '"+string(pathBuf[:])+"': ", ret)
 		}
+		dateBufLen = SlicePutTm(unsafe.Slice(&dateBuf[0], len(dateBuf)), TimeToTm(st.Birthtime.Sec))
 
-		tweet.Ctime = st.Ctime.Sec
-		tweet.Text = ReadEntireFile(fd)
+		text := ReadEntireFile(fd)
 		Close(fd)
+
+		tweet = append(tweet, tweetBeforeDate...)
+		tweet = append(tweet, unsafe.Slice(&dateBuf[0], dateBufLen)...)
+		tweet = append(tweet, tweetBeforeID...)
+		tweet = append(tweet, unsafe.Slice(&idBuf[0], idBufLen)...)
+		tweet = append(tweet, tweetBeforeText...)
+		tweet = append(tweet, text...)
+		tweet = append(tweet, tweetAfterText...)
 
 		Tweets = append(Tweets, tweet)
 	}

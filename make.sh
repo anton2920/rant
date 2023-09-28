@@ -33,7 +33,7 @@ STARTTIME=`date +%s`
 
 case $1 in
 	'' | debug)
-		run go build $VERBOSITYFLAGS -o $PROJECT -race -gcflags='all=-N -l' .
+		run go build -o rant -race -gcflags='all=-N -l' -asmflags='-I /usr/include'
 		echo "Don't forget to clean up `go env GOCACHE` directory!"
 		;;
 	all)
@@ -47,41 +47,6 @@ case $1 in
 		run rm -rf `go env GOCACHE`
 		run rm -rf /tmp/cover*
 		;;
-	check)
-		run go vet
-		check_db_variable
-		run go test -race -cover
-		echo "Don't forget to clean up `go env GOCACHE` directory!"
-		;;
-	check-bench)
-		export CGO_ENABLED=0
-		run go vet
-		check_db_variable
-		run go test -bench=. -run=^Benchmark -benchmem
-		echo "Don't forget to clean up `go env GOCACHE` directory!"
-		;;
-	check-bench-cpu)
-		export CGO_ENABLED=0
-		run go vet
-		check_db_variable
-		run go test -v -bench=. -run=^Benchmark -benchmem -cpuprofile=cpu.pprof
-		echo "Don't forget to clean up `go env GOCACHE` directory!"
-		;;
-	check-bench-mem)
-		export CGO_ENABLED=0
-		run go vet
-		check_db_variable
-		run go test -v -bench=. -run=^Benchmark -benchmem -cpuprofile=mem.pprof
-		echo "Don't forget to clean up `go env GOCACHE` directory!"
-		;;
-	check-cover | check-cover-report)
-		run go vet
-		check_db_variable
-		run go test -race -coverprofile=c.out
-		run go tool cover -html=c.out
-		run rm -f c.out
-		echo "Don't forget to clean up `go env GOCACHE` directory!"
-		;;
 	fmt)
 		if which goimports >/dev/null; then
 			run goimports -l -w *.go
@@ -92,7 +57,7 @@ case $1 in
 	vet)
 		run go vet
 		run $0 $VERBOSITYFLAGS clean
-		rm -rf $HOME/.cache/go-build/
+		echo "Don't forget to clean up `go env GOCACHE` directory!"
 		;;
 	disas | disasm | esc | escape | escape-analysis | objdump | release)
 		run ./make-rant.sh $VERBOSITYFLAGS $1
