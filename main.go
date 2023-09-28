@@ -576,6 +576,7 @@ func ReadTweets() {
 	copy(unsafe.Slice(&pathBuf[0], len(pathBuf)), []byte(tweetsPath))
 
 	TweetHTMLs = make([][]byte, 0, 128)
+	TweetTexts = make([][]byte, 0, 128)
 
 	for i := 0; ; i++ {
 		tweet := make([]byte, 0, 2048)
