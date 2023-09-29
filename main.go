@@ -9,6 +9,7 @@ var (
 	RSSPage      *[]byte
 	RSSFinisher  *[]byte
 	Photo        *[]byte
+	RSSPhoto     *[]byte
 
 	IndexPageFull []byte
 	RSSPageFull   []byte
@@ -110,6 +111,12 @@ func RSSPageHandler(w *Response, r *Request) {
 	w.Body = append(w.Body, RSSPageFull...)
 }
 
+func RSSPhotoHandler(w *Response, r *Request) {
+	w.Code = StatusOK
+	w.ContentType = "image/png"
+	w.Body = append(w.Body, *RSSPhoto...)
+}
+
 func Router(w *Response, r *Request) {
 	if r.URL.Path == "/" {
 		IndexPageHandler(w, r)
@@ -122,6 +129,8 @@ func Router(w *Response, r *Request) {
 		TweetPageHandler(w, r)
 	} else if (len(r.URL.Path) == len("/rss")) && (r.URL.Path == "/rss") {
 		RSSPageHandler(w, r)
+	} else if (len(r.URL.Path) == len("/rss.png")) && (r.URL.Path == "/rss.png") {
+		RSSPhotoHandler(w, r)
 	} else {
 		w.Code = StatusNotFound
 	}
@@ -146,6 +155,9 @@ func main() {
 		FatalError(err)
 	}
 	if RSSFinisher, err = ReadPage("pages/finisher.rss"); err != nil {
+		FatalError(err)
+	}
+	if RSSPhoto, err = ReadPage("pages/rss.png"); err != nil {
 		FatalError(err)
 	}
 	go MonitorPages()

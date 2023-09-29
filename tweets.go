@@ -29,7 +29,7 @@ func ReadTweets() error {
 	var idBuf [10]byte
 	var idBufLen int
 
-	var dateBuf [25]byte
+	var dateBuf [50]byte
 	var dateBufLen int
 
 	var text []byte
@@ -56,7 +56,8 @@ func ReadTweets() error {
 		if ret := Fstat(fd, &st); ret < 0 {
 			return NewError("Failed to get stat of '"+string(pathBuf[:])+"': ", int(ret))
 		}
-		dateBufLen = SlicePutTm(unsafe.Slice(&dateBuf[0], len(dateBuf)), TimeToTm(st.Birthtime.Sec))
+		tm := TimeToTm(st.Birthtime.Sec)
+		dateBufLen = SlicePutTm(unsafe.Slice(&dateBuf[0], len(dateBuf)), tm)
 
 		if text, err = ReadEntireFile(fd); err != nil {
 			return err
@@ -74,6 +75,7 @@ func ReadTweets() error {
 		tweet = append(tweet, tweetHTMLAfterText...)
 		TweetHTMLs = append(TweetHTMLs, tweet)
 
+		dateBufLen = SlicePutTmRFC822(unsafe.Slice(&dateBuf[0], len(dateBuf)), tm)
 		tweet = make([]byte, 0, 4*1024)
 		tweet = tweet[:0]
 		tweet = append(tweet, tweetRSSBeforeTitle...)

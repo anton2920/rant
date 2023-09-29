@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<rss version="2.0">
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
 <channel>
 	<title>Rant: X clone</title>
 	<description>X-like thing to rant on things</description>
 	<link>https://rant.anton2920.ru/</link>
+	<atom:link href="https://rant.anton2920.ru/rss" rel="self" type="application/rss+xml" />
 	<ttl>300</ttl>

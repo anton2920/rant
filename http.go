@@ -29,66 +29,71 @@ const (
 )
 
 func HTTPWorker(cc <-chan int32, router HTTPRouter) {
-	var buffer [512]byte
+	var requestBuffer [512]byte
+	var responseBuffer []byte
 
 	var w Response
 	w.Body = make([]byte, 0, 4*1024)
 
+	responseBuffer = make([]byte, 0, 8*1024)
+
 	for c := range cc {
 		var r Request
 
-		Read(c, unsafe.Slice(&buffer[0], len(buffer)))
-		if unsafe.String(&buffer[0], 3) == "GET" {
-			lineEnd := FindChar(unsafe.String(&buffer[4], len(buffer)-4), '\r')
-			requestLine := unsafe.String(&buffer[4], lineEnd-1) /* without method. */
+		responseBuffer = responseBuffer[:0]
+		w.Body = w.Body[:0]
+		w.ContentType = ""
 
-			pathEnd := FindChar(requestLine, '?')
-			if pathEnd != -1 {
-				/* With query. */
-				r.URL.Path = unsafe.String(unsafe.StringData(requestLine), pathEnd)
-
-				queryStart := pathEnd + 1
-				queryEnd := FindChar(unsafe.String((*byte)(unsafe.Add(unsafe.Pointer(unsafe.StringData(requestLine)), queryStart)), len(requestLine)-queryStart), ' ')
-				r.URL.Query = unsafe.String((*byte)(unsafe.Add(unsafe.Pointer(unsafe.StringData(requestLine)), queryStart)), queryEnd)
-			} else {
-				/* No query. */
-				pathEnd = FindChar(requestLine, ' ')
-				r.URL.Path = unsafe.String(unsafe.StringData(requestLine), pathEnd)
-			}
-		} else {
+		Read(c, unsafe.Slice(&requestBuffer[0], len(requestBuffer)))
+		if unsafe.String(&requestBuffer[0], 3) != "GET" {
 			WriteFull(c, []byte(ResponseBadRequest))
 			Close(c)
-			clear(unsafe.Slice(&buffer[0], len(buffer)))
 			continue
+		}
+
+		lineEnd := FindChar(unsafe.String(&requestBuffer[4], len(requestBuffer)-4), '\r')
+		requestLine := unsafe.String(&requestBuffer[4], lineEnd-1) /* without method. */
+
+		pathEnd := FindChar(requestLine, '?')
+		if pathEnd != -1 {
+			/* With query. */
+			r.URL.Path = unsafe.String(unsafe.StringData(requestLine), pathEnd)
+
+			queryStart := pathEnd + 1
+			queryEnd := FindChar(unsafe.String((*byte)(unsafe.Add(unsafe.Pointer(unsafe.StringData(requestLine)), queryStart)), len(requestLine)-queryStart), ' ')
+			r.URL.Query = unsafe.String((*byte)(unsafe.Add(unsafe.Pointer(unsafe.StringData(requestLine)), queryStart)), queryEnd)
+		} else {
+			/* Without query. */
+			pathEnd = FindChar(requestLine, ' ')
+			r.URL.Path = unsafe.String(unsafe.StringData(requestLine), pathEnd)
 		}
 
 		router(&w, &r)
 		switch w.Code {
 		case StatusOK:
-			WriteFull(c, []byte("HTTP/1.1 200 OK\r\nConnection: close\r\n"))
+			responseBuffer = append(responseBuffer, []byte("HTTP/1.1 200 OK\r\nConnection: close\r\n")...)
 			switch w.ContentType {
 			case "", "text/html":
-				WriteFull(c, []byte("Content-Type: text/html\r\n\r\n"))
+				responseBuffer = append(responseBuffer, []byte("Content-Type: text/html\r\n\r\n")...)
 			case "image/jpg":
-				WriteFull(c, []byte("Content-Type: image/jpg\r\nCache-Control: max-age=604800\r\n\r\n"))
+				responseBuffer = append(responseBuffer, []byte("Content-Type: image/jpg\r\nCache-Control: max-age=604800\r\n\r\n")...)
 			case "application/rss+xml":
-				WriteFull(c, []byte("Content-Type: application/rss+xml\r\n\r\n"))
+				responseBuffer = append(responseBuffer, []byte("Content-Type: application/rss+xml\r\n\r\n")...)
+			case "image/png":
+				responseBuffer = append(responseBuffer, []byte("Content-Type: image/png\r\nCache-Control: max-age=604800\r\n\r\n")...)
 			default:
-				panic("unknown Content-Type")
+				panic("unknown Content-Type '" + w.ContentType + "'")
 			}
-			WriteFull(c, w.Body)
+			responseBuffer = append(responseBuffer, w.Body...)
 		case StatusBadRequest:
-			WriteFull(c, []byte(ResponseBadRequest))
+			responseBuffer = append(responseBuffer, ResponseBadRequest...)
 		case StatusNotFound:
-			WriteFull(c, []byte(ResponseNotFound))
+			responseBuffer = append(responseBuffer, ResponseNotFound...)
 		}
 
+		WriteFull(c, responseBuffer)
 		Shutdown(c, SHUT_WR)
 		Close(c)
-
-		clear(unsafe.Slice(&buffer[0], len(buffer)))
-		w.Body = w.Body[:0]
-		w.ContentType = ""
 	}
 }
 
