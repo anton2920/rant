@@ -87,7 +87,7 @@ func SlicePutTm(buf []byte, tm Tm) int {
 func SlicePutTmRFC822(buf []byte, tm Tm) int {
 	var n, ndigits int
 
-	var wdays = [...]string{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
+	var wdays = [...]string{"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"}
 	var months = [...]string{"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"}
 
 	n += copy(buf[n:], wdays[tm.Wday])
