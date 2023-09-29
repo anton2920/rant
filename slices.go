@@ -140,10 +140,11 @@ func SlicePutTmRFC822(buf []byte, tm Tm) int {
 	buf[n] = ' '
 	n++
 
-	buf[n] = 'M'
-	buf[n+1] = 'S'
-	buf[n+2] = 'K'
+	buf[n] = '+'
+	buf[n+1] = '0'
+	buf[n+2] = '3'
+	buf[n+3] = '0'
+	buf[n+4] = '0'
 
-	return n + 3
-
+	return n + 5
 }
