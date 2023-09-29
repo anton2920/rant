@@ -1,8 +1,10 @@
 package main
 
-func FindRune(haystack string, needle rune) int {
-	for i, r := range haystack {
-		if r == needle {
+func FindChar(haystack string, needle byte) int {
+	var i int
+
+	for i = 0; i < len(haystack); i++ {
+		if haystack[i] == needle {
 			return i
 		}
 	}

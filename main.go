@@ -423,20 +423,20 @@ func HandleConn(c int32) {
 	if unsafe.String(&buffer[0], 3) == "GET" {
 		r.Method = "GET"
 
-		lineEnd := FindRune(unsafe.String(&buffer[len(r.Method)+1], len(buffer)-len(r.Method)+1), '\r')
+		lineEnd := FindChar(unsafe.String(&buffer[len(r.Method)+1], len(buffer)-len(r.Method)+1), '\r')
 		requestLine := unsafe.String(&buffer[len(r.Method)+1], lineEnd-1) /* without method. */
 
-		pathEnd := FindRune(requestLine, '?')
+		pathEnd := FindChar(requestLine, '?')
 		if pathEnd != -1 {
 			/* With query. */
 			r.Path = unsafe.String(unsafe.StringData(requestLine), pathEnd)
 
 			queryStart := pathEnd + 1
-			queryEnd := FindRune(unsafe.String((*byte)(unsafe.Add(unsafe.Pointer(unsafe.StringData(requestLine)), queryStart)), len(requestLine)-queryStart), ' ')
+			queryEnd := FindChar(unsafe.String((*byte)(unsafe.Add(unsafe.Pointer(unsafe.StringData(requestLine)), queryStart)), len(requestLine)-queryStart), ' ')
 			r.Query = unsafe.String((*byte)(unsafe.Add(unsafe.Pointer(unsafe.StringData(requestLine)), queryStart)), queryEnd)
 		} else {
 			/* No query. */
-			pathEnd = FindRune(requestLine, ' ')
+			pathEnd = FindChar(requestLine, ' ')
 			r.Path = unsafe.String(unsafe.StringData(requestLine), pathEnd)
 		}
 	} else {
