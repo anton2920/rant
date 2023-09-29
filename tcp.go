@@ -28,6 +28,7 @@ const (
 	SOL_SOCKET   = 0xFFFF
 	SO_REUSEPORT = 0x00000200
 
+	SHUT_RD = 0
 	SHUT_WR = 1
 
 	/* From <netinet/in.h>. */

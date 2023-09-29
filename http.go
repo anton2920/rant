@@ -5,38 +5,38 @@ import (
 	"unsafe"
 )
 
-type HTTPRequest struct {
+type Request struct {
 	URL URL
 }
 
-type HTTPResponse struct {
+type Response struct {
 	Code        int
 	ContentType string
 	Body        []byte
 }
 
-type HTTPRouter func(w *HTTPResponse, r *HTTPRequest)
+type HTTPRouter func(w *Response, r *Request)
 
 const (
-	HTTPStatusOK         = 200
-	HTTPStatusBadRequest = 400
-	HTTPStatusNotFound   = 404
+	StatusOK         = 200
+	StatusBadRequest = 400
+	StatusNotFound   = 404
 )
 
 const (
-	HTTPResponseBadRequest = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n<!DOCTYPE html><head><title>400 Bad Request</title></head><body><h1>400 Bad Request</h1><p>Your browser sent a request that this server could not understand.</p></body></html>"
-	HTTPResponseNotFound   = "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n<!DOCTYPE html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1><p>The requested URL was not found on this server.</p></body></html>"
+	ResponseBadRequest = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n<!DOCTYPE html><head><title>400 Bad Request</title></head><body><h1>400 Bad Request</h1><p>Your browser sent a request that this server could not understand.</p></body></html>"
+	ResponseNotFound   = "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n<!DOCTYPE html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1><p>The requested URL was not found on this server.</p></body></html>"
 )
 
-func HTTPHandleTCPConn(cc <-chan int32, router HTTPRouter) {
+func HTTPWorker(cc <-chan int32, router HTTPRouter) {
 	var buffer [512]byte
 
-	var r HTTPRequest
-	var w HTTPResponse
-
+	var w Response
 	w.Body = make([]byte, 0, 4*1024)
 
 	for c := range cc {
+		var r Request
+
 		Read(c, unsafe.Slice(&buffer[0], len(buffer)))
 		if unsafe.String(&buffer[0], 3) == "GET" {
 			lineEnd := FindChar(unsafe.String(&buffer[4], len(buffer)-4), '\r')
@@ -56,29 +56,31 @@ func HTTPHandleTCPConn(cc <-chan int32, router HTTPRouter) {
 				r.URL.Path = unsafe.String(unsafe.StringData(requestLine), pathEnd)
 			}
 		} else {
-			WriteFull(c, []byte(HTTPResponseBadRequest))
+			WriteFull(c, []byte(ResponseBadRequest))
 			Close(c)
-			return
+			clear(unsafe.Slice(&buffer[0], len(buffer)))
+			continue
 		}
-		/* println(r.Method, len(r.Method), r.Path, len(r.Path), r.Query, len(r.Query)) */
 
 		router(&w, &r)
 		switch w.Code {
-		case HTTPStatusOK:
+		case StatusOK:
 			WriteFull(c, []byte("HTTP/1.1 200 OK\r\nConnection: close\r\n"))
 			switch w.ContentType {
 			case "", "text/html":
 				WriteFull(c, []byte("Content-Type: text/html\r\n\r\n"))
 			case "image/jpg":
 				WriteFull(c, []byte("Content-Type: image/jpg\r\nCache-Control: max-age=604800\r\n\r\n"))
+			case "application/rss+xml":
+				WriteFull(c, []byte("Content-Type: application/rss+xml\r\n\r\n"))
 			default:
 				panic("unknown Content-Type")
 			}
 			WriteFull(c, w.Body)
-		case HTTPStatusBadRequest:
-			WriteFull(c, []byte(HTTPResponseBadRequest))
-		case HTTPStatusNotFound:
-			WriteFull(c, []byte(HTTPResponseNotFound))
+		case StatusBadRequest:
+			WriteFull(c, []byte(ResponseBadRequest))
+		case StatusNotFound:
+			WriteFull(c, []byte(ResponseNotFound))
 		}
 
 		Shutdown(c, SHUT_WR)
@@ -86,10 +88,11 @@ func HTTPHandleTCPConn(cc <-chan int32, router HTTPRouter) {
 
 		clear(unsafe.Slice(&buffer[0], len(buffer)))
 		w.Body = w.Body[:0]
+		w.ContentType = ""
 	}
 }
 
-func HTTPListenAndServe(port uint16, router HTTPRouter) error {
+func ListenAndServe(port uint16, router HTTPRouter) error {
 	var ret, l int32
 
 	if l = Socket(PF_INET, SOCK_STREAM, 0); l < 0 {
@@ -113,7 +116,7 @@ func HTTPListenAndServe(port uint16, router HTTPRouter) error {
 
 	cc := make(chan int32)
 	for i := 0; i < runtime.GOMAXPROCS(0); i++ {
-		go HTTPHandleTCPConn(cc, router)
+		go HTTPWorker(cc, router)
 	}
 
 	for {
@@ -121,9 +124,6 @@ func HTTPListenAndServe(port uint16, router HTTPRouter) error {
 		var addr SockAddrIn
 		var addrLen uint32 = uint32(unsafe.Sizeof(addr))
 		if c = Accept(l, &addr, &addrLen); c < 0 {
-			if -c != EINTR {
-				return NewError("Failed to accept connection: ", int(c))
-			}
 			continue
 		}
 

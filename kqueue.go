@@ -12,7 +12,7 @@ type Kevent_t struct {
 	Ext    [4]uint
 }
 
-type KqueueCb func(Kevent_t)
+type KqueueCb func(Kevent_t) error
 
 const (
 	/* From <sys/event.h>. */
@@ -41,7 +41,9 @@ func KqueueMonitor(eventlist []Kevent_t, cb KqueueCb) error {
 			}
 			continue
 		} else if nevents > 0 {
-			cb(event)
+			if err := cb(event); err != nil {
+				return err
+			}
 		}
 
 		/* NOTE(anton2920): sleep to prevent runaway events. */
