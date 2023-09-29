@@ -43,7 +43,7 @@ TEXT main·Exit(SB), NOSPLIT, $0-4
 	MOVQ $SYS_exit, AX
 	MOVL status+0(FP), DI
 	SYSCALL
-	/* NOTE(anton2920): this is the point of noreturn. */
+	/* NOTE(anton2920): this is the point64 of noreturn. */
 	MOVQ 0x0, AX
 
 /* func RawFstat(fd int32, sb *Stat) int32 */
@@ -57,7 +57,7 @@ TEXT main·RawFstat(SB), NOSPLIT, $0-12
 	MOVL AX, ret+16(FP)
 	RET
 
-/* func RawKevent(kq int32, changelist []Kevent, eventlist []Kevent, timeout *Timespec) */
+/* func RawKevent(kq int32, changelist []Kevent, eventlist []Kevent, timeout *Timespec) int32 */
 TEXT main·RawKevent(SB), NOSPLIT, $0-60
 	MOVQ $SYS_kevent, AX
 	MOVL kq+0(FP), DI
@@ -92,7 +92,7 @@ TEXT main·RawListen(SB), NOSPLIT, $0-8
 	MOVL AX, ret+8(FP)
 	RET
 
-/* func RawLseek(fd int32, offset int, whence int32) int */
+/* func RawLseek(fd int32, offset int64, whence int32) int64 */
 TEXT main·RawLseek(SB), NOSPLIT, $0-16
 	MOVQ $SYS_lseek, AX
 	MOVL fd+0(FP), DI
@@ -127,7 +127,7 @@ TEXT main·RawOpen(SB), NOSPLIT, $0-22
 	MOVQ AX, ret+24(FP)
 	RET
 
-/* func RawRead(fd int32, buf []byte) int */
+/* func RawRead(fd int32, buf []byte) int64 */
 TEXT main·RawRead(SB), NOSPLIT, $0-28
 	MOVQ $SYS_read, AX
 	MOVL fd+0(FP), DI
@@ -176,7 +176,7 @@ TEXT main·RawSocket(SB), NOSPLIT, $0-12
 	MOVL AX, ret+16(FP)
 	RET
 
-/* func RawWrite(fd int32, buf []byte) int */
+/* func RawWrite(fd int32, buf []byte) int64 */
 TEXT main·RawWrite(SB), NOSPLIT, $0-28
 	MOVQ $SYS_write, AX
 	MOVL fd+0(FP), DI

@@ -80,9 +80,9 @@ func Listen(s int32, backlog int32) (ret int32) {
 }
 
 //go:nosplit
-func RawLseek(fd int32, offset int, whence int32) int
+func RawLseek(fd int32, offset int64, whence int32) int64
 
-func Lseek(fd int32, offset int, whence int32) (ret int) {
+func Lseek(fd int32, offset int64, whence int32) (ret int64) {
 	SyscallEnter()
 	ret = RawLseek(fd, offset, whence)
 	SyscallExit()
@@ -113,9 +113,9 @@ func Open(path string, flags int32, mode uint16) (ret int32) {
 
 //go:noescape
 //go:nosplit
-func RawRead(fd int32, buf []byte) int
+func RawRead(fd int32, buf []byte) int64
 
-func Read(fd int32, buf []byte) (ret int) {
+func Read(fd int32, buf []byte) (ret int64) {
 	SyscallEnter()
 	ret = RawRead(fd, buf)
 	SyscallExit()
@@ -155,9 +155,9 @@ func Socket(domain, typ, protocol int32) (ret int32) {
 
 //go:noescape
 //go:nosplit
-func RawWrite(fd int32, buf []byte) int
+func RawWrite(fd int32, buf []byte) int64
 
-func Write(fd int32, buf []byte) (ret int) {
+func Write(fd int32, buf []byte) (ret int64) {
 	SyscallEnter()
 	ret = RawWrite(fd, buf)
 	SyscallExit()
