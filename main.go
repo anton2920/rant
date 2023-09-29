@@ -127,6 +127,7 @@ var (
 	Photo     *[]byte
 
 	TweetHTMLs [][]byte
+
 	TweetTexts [][]byte
 
 	IndexPageFull []byte
@@ -671,11 +672,10 @@ func main() {
 	IndexPage = ReadPage("pages/index.html")
 	TweetPage = ReadPage("pages/tweet.html")
 	Photo = ReadPage("pages/photo.jpg")
+	go MonitorPages()
 
 	ReadTweets()
 	ConstructIndexPage()
-
-	go MonitorPages()
 	go MonitorTweets()
 
 	if l = Socket(PF_INET, SOCK_STREAM, 0); l < 0 {

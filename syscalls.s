@@ -4,8 +4,8 @@
 #include "textflag.h"
 #include "sys/syscall.h"
 
-/* func Accept(s int32, addr *SockAddr, addrlen *uint32) int32 */
-TEXT main·Accept(SB), NOSPLIT, $0-20
+/* func RawAccept(s int32, addr *SockAddr, addrlen *uint32) int32 */
+TEXT main·RawAccept(SB), NOSPLIT, $0-20
 	MOVQ $SYS_accept, AX
 	MOVL s+0(FP), DI
 	MOVQ addr+8(FP), SI
@@ -16,8 +16,8 @@ TEXT main·Accept(SB), NOSPLIT, $0-20
 	MOVL AX, ret+24(FP)
 	RET
 
-/* func Bind(s int32, addr *SockAddr, addrlen uint32) int32 */
-TEXT main·Bind(SB), NOSPLIT, $0-16
+/* func RawBind(s int32, addr *SockAddr, addrlen uint32) int32 */
+TEXT main·RawBind(SB), NOSPLIT, $0-16
 	MOVQ $SYS_bind, AX
 	MOVL s+0(FP), DI
 	MOVQ addr+8(FP), SI
@@ -28,8 +28,8 @@ TEXT main·Bind(SB), NOSPLIT, $0-16
 	MOVL AX, ret+24(FP)
 	RET
 
-/* func Close(fd int32) int32 */
-TEXT main·Close(SB), NOSPLIT, $0-4
+/* func RawClose(fd int32) int32 */
+TEXT main·RawClose(SB), NOSPLIT, $0-4
 	MOVQ $SYS_close, AX
 	MOVL fd+0(FP), DI
 	SYSCALL
@@ -46,8 +46,8 @@ TEXT main·Exit(SB), NOSPLIT, $0-4
 	/* NOTE(anton2920): this is the point of noreturn. */
 	MOVQ 0x0, AX
 
-/* func Fstat(fd int32, sb *Stat) int32 */
-TEXT main·Fstat(SB), NOSPLIT, $0-12
+/* func RawFstat(fd int32, sb *Stat) int32 */
+TEXT main·RawFstat(SB), NOSPLIT, $0-12
 	MOVQ $SYS_fstat, AX
 	MOVL fd+0(FP), DI
 	MOVQ sb+8(FP), SI
@@ -57,8 +57,8 @@ TEXT main·Fstat(SB), NOSPLIT, $0-12
 	MOVL AX, ret+16(FP)
 	RET
 
-/* func Kevent(kq int32, changelist []Kevent, eventlist []Kevent, timeout *Timespec) */
-TEXT main·Kevent(SB), NOSPLIT, $0-60
+/* func RawKevent(kq int32, changelist []Kevent, eventlist []Kevent, timeout *Timespec) */
+TEXT main·RawKevent(SB), NOSPLIT, $0-60
 	MOVQ $SYS_kevent, AX
 	MOVL kq+0(FP), DI
 	MOVQ chlist+8(FP), SI
@@ -72,8 +72,8 @@ TEXT main·Kevent(SB), NOSPLIT, $0-60
 	MOVL AX, ret+64(FP)
 	RET
 
-/* func Kqueue() int32 */
-TEXT main·Kqueue(SB), NOSPLIT, $0-0
+/* func RawKqueue() int32 */
+TEXT main·RawKqueue(SB), NOSPLIT, $0-0
 	MOVQ $SYS_kqueue, AX
 	SYSCALL
 	JCC 2(PC)
@@ -81,8 +81,8 @@ TEXT main·Kqueue(SB), NOSPLIT, $0-0
 	MOVL AX, ret+0(FP)
 	RET
 
-/* func Listen(s int32, backlog int32) int32 */
-TEXT main·Listen(SB), NOSPLIT, $0-8
+/* func RawListen(s int32, backlog int32) int32 */
+TEXT main·RawListen(SB), NOSPLIT, $0-8
 	MOVQ $SYS_listen, AX
 	MOVL s+0(FP), DI
 	MOVL backlog+4(FP), SI
@@ -92,8 +92,8 @@ TEXT main·Listen(SB), NOSPLIT, $0-8
 	MOVL AX, ret+8(FP)
 	RET
 
-/* func Lseek(fd int32, offset int, whence int32) int */
-TEXT main·Lseek(SB), NOSPLIT, $0-16
+/* func RawLseek(fd int32, offset int, whence int32) int */
+TEXT main·RawLseek(SB), NOSPLIT, $0-16
 	MOVQ $SYS_lseek, AX
 	MOVL fd+0(FP), DI
 	MOVQ offset+8(FP), SI
@@ -104,8 +104,8 @@ TEXT main·Lseek(SB), NOSPLIT, $0-16
 	MOVQ AX, ret+24(FP)
 	RET
 
-/* func Nanosleep(rqtp, rmtp *Timespec) int32 */
-TEXT main·Nanosleep(SB), NOSPLIT, $0-16
+/* func RawNanosleep(rqtp, rmtp *Timespec) int32 */
+TEXT main·RawNanosleep(SB), NOSPLIT, $0-16
 	MOVQ $SYS_nanosleep, AX
 	MOVQ rqtp+0(FP), DI
 	MOVQ rmtp+8(FP), SI
@@ -115,8 +115,8 @@ TEXT main·Nanosleep(SB), NOSPLIT, $0-16
 	MOVL AX, ret+16(FP)
 	RET
 
-/* func Open(path string, flags int32, mode uint16) int32 */
-TEXT main·Open(SB), NOSPLIT, $0-22
+/* func RawOpen(path string, flags int32, mode uint16) int32 */
+TEXT main·RawOpen(SB), NOSPLIT, $0-22
 	MOVQ $SYS_open, AX
 	MOVQ path+0(FP), DI
 	MOVL flags+16(FP), SI
@@ -127,8 +127,8 @@ TEXT main·Open(SB), NOSPLIT, $0-22
 	MOVQ AX, ret+24(FP)
 	RET
 
-/* func Read(fd int32, buf []byte) int */
-TEXT main·Read(SB), NOSPLIT, $0-28
+/* func RawRead(fd int32, buf []byte) int */
+TEXT main·RawRead(SB), NOSPLIT, $0-28
 	MOVQ $SYS_read, AX
 	MOVL fd+0(FP), DI
 	MOVQ buf+8(FP), SI
@@ -139,8 +139,8 @@ TEXT main·Read(SB), NOSPLIT, $0-28
 	MOVQ AX, ret+32(FP)
 	RET
 
-/* func Setsockopt(s, level, optname int32, optval unsafe.Pointer, optlen uint32) int32 */
-TEXT main·Setsockopt(SB), NOSPLIT, $0-24
+/* func RawSetsockopt(s, level, optname int32, optval unsafe.Pointer, optlen uint32) int32 */
+TEXT main·RawSetsockopt(SB), NOSPLIT, $0-24
 	MOVQ $SYS_setsockopt, AX
 	MOVL s+0(FP), DI
 	MOVL lvl+4(FP), SI
@@ -153,8 +153,8 @@ TEXT main·Setsockopt(SB), NOSPLIT, $0-24
 	MOVL AX, ret+32(FP)
 	RET
 
-/* func Shutdown(s int32, how int32) int32 */
-TEXT main·Shutdown(SB), NOSPLIT, $0-8
+/* func RawShutdown(s int32, how int32) int32 */
+TEXT main·RawShutdown(SB), NOSPLIT, $0-8
 	MOVQ $SYS_shutdown, AX
 	MOVL s+0(FP), DI
 	MOVL how+4(FP), SI
@@ -164,8 +164,8 @@ TEXT main·Shutdown(SB), NOSPLIT, $0-8
 	MOVL AX, ret+8(FP)
 	RET
 
-/* func Socket(domain, typ, protocol int32) int32 */
-TEXT main·Socket(SB), NOSPLIT, $0-12
+/* func RawSocket(domain, typ, protocol int32) int32 */
+TEXT main·RawSocket(SB), NOSPLIT, $0-12
 	MOVQ $SYS_socket, AX
 	MOVL domain+0(FP), DI
 	MOVL type+4(FP), SI
@@ -176,8 +176,8 @@ TEXT main·Socket(SB), NOSPLIT, $0-12
 	MOVL AX, ret+16(FP)
 	RET
 
-/* func Write(fd int32, buf []byte) int */
-TEXT main·Write(SB), NOSPLIT, $0-28
+/* func RawWrite(fd int32, buf []byte) int */
+TEXT main·RawWrite(SB), NOSPLIT, $0-28
 	MOVQ $SYS_write, AX
 	MOVL fd+0(FP), DI
 	MOVQ buf+8(FP), SI
