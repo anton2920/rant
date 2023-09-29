@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <head>
 	<title>Rant: X clone</title>
+	<link rel="alternate" type="application/rss+xml" title="RSS 2.0" href="/rss">
 
 	<style>
 		body {
@@ -19,6 +20,17 @@
 		a {
 			text-decoration: none;
 			color: black;
+		}
+
+		.rss {
+			z-index: 1;
+			float: right;
+			margin-top: -10px;
+			margin-right: 10px;
+		}
+
+		.rss img {
+			width: 48px;
 		}
 
 		.tweet {
@@ -71,6 +83,12 @@
 	</script>
 </head>
 <body>
+	<div class="rss">
+		<a href="/rss">
+			<img src="https://upload.wikimedia.org/wikipedia/en/thumb/4/43/Feed-icon.svg/320px-Feed-icon.svg.png" alt="RSS">
+		</a>
+	</div>
+
 	<div class="search">
 		<form method="GET" action="/">
 			<input id="query" style="width: 476px" oninput="OnQueryChange()" type="text" name="Query">

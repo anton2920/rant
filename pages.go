@@ -37,6 +37,7 @@ func MonitorPages() {
 		if Pages[event.Ident], err = ReadEntireFile(int32(event.Ident)); err != nil {
 			return err
 		}
+		ConstructIndexPage()
 		return nil
 	}); err != nil {
 		FatalError(err)
