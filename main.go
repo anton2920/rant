@@ -15,38 +15,6 @@ var (
 	RSSPageFull   []byte
 )
 
-func ConstructIndexPage() {
-	var totalLen int
-
-	totalLen += len(*IndexPage)
-	for _, tweet := range TweetHTMLs {
-		totalLen += len(tweet)
-	}
-
-	IndexPageFull = IndexPageFull[:0]
-	IndexPageFull = append(IndexPageFull, *IndexPage...)
-	for i := len(TweetHTMLs) - 1; i >= 0; i-- {
-		IndexPageFull = append(IndexPageFull, TweetHTMLs[i]...)
-	}
-	IndexPageFull = append(IndexPageFull, *FinisherPage...)
-}
-
-func ConstructRSSPage() {
-	var totalLen int
-
-	totalLen += len(*RSSPage)
-	for _, tweet := range TweetRSSs {
-		totalLen += len(tweet)
-	}
-
-	RSSPageFull = RSSPageFull[:0]
-	RSSPageFull = append(RSSPageFull, *RSSPage...)
-	for i := len(TweetRSSs) - 1; i >= 0; i-- {
-		RSSPageFull = append(RSSPageFull, TweetRSSs[i]...)
-	}
-	RSSPageFull = append(RSSPageFull, *RSSFinisher...)
-}
-
 func IndexPageHandler(w *Response, r *Request) {
 	const maxQueryLen = 256
 	var queryString string
@@ -137,27 +105,15 @@ func Router(w *Response, r *Request) {
 }
 
 func main() {
-	var err error
-
-	if IndexPage, err = ReadPage("pages/index.html"); err != nil {
-		FatalError(err)
-	}
-	if TweetPage, err = ReadPage("pages/tweet.html"); err != nil {
-		FatalError(err)
-	}
-	if FinisherPage, err = ReadPage("pages/finisher.html"); err != nil {
-		FatalError(err)
-	}
-	if Photo, err = ReadPage("pages/photo.jpg"); err != nil {
-		FatalError(err)
-	}
-	if RSSPage, err = ReadPage("pages/index.rss"); err != nil {
-		FatalError(err)
-	}
-	if RSSFinisher, err = ReadPage("pages/finisher.rss"); err != nil {
-		FatalError(err)
-	}
-	if RSSPhoto, err = ReadPage("pages/rss.png"); err != nil {
+	if err := ReadPages([]PageDescription{
+		{&IndexPage, "pages/index.html"},
+		{&TweetPage, "pages/tweet.html"},
+		{&FinisherPage, "pages/finisher.html"},
+		{&Photo, "pages/photo.jpg"},
+		{&RSSPage, "pages/index.rss"},
+		{&RSSFinisher, "pages/finisher.rss"},
+		{&RSSPhoto, "pages/rss.png"},
+	}); err != nil {
 		FatalError(err)
 	}
 	go MonitorPages()
