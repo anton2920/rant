@@ -14,7 +14,7 @@ func ReadTweets() error {
 	const tweetHTMLBeforeDate = `<div class="tweet"><div class="tweet-insides"><img class="tweet-avatar" src="/photo.jpg" alt="Profile picture"><div><div class="tweet-header"><a href="/"><b>Anton Pavlovskii</b><span>@anton2920 `
 	const tweetHTMLBeforeID = `</span></a></div><a href="/tweet/`
 	const tweetHTMLBeforeText = `"><p>`
-	const tweetHTMLAfterText = `</p></div></div></a></div>`
+	const tweetHTMLAfterText = `</p></a></div></div></div>`
 
 	const tweetRSSBeforeTitle = `<item><title>Tweet #`
 	const tweetRSSBeforeDesc = `</title><description>`
