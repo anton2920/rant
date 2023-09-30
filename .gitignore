@@ -1,6 +1,7 @@
 .acme/
 build/
 rant
+rant.esc
 rant.s
 rant.sh
 restart_rant

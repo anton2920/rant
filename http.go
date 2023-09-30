@@ -33,13 +33,12 @@ func HTTPWorker(cc <-chan int32, router HTTPRouter) {
 	var responseBuffer []byte
 
 	var w Response
-	w.Body = make([]byte, 0, 4*1024)
+	var r Request
+	w.Body = make([]byte, 0, 32*1024)
 
-	responseBuffer = make([]byte, 0, 8*1024)
+	responseBuffer = make([]byte, 0, 64*1024)
 
 	for c := range cc {
-		var r Request
-
 		responseBuffer = responseBuffer[:0]
 		w.Body = w.Body[:0]
 		w.ContentType = ""
@@ -68,7 +67,10 @@ func HTTPWorker(cc <-chan int32, router HTTPRouter) {
 			r.URL.Path = unsafe.String(unsafe.StringData(requestLine), pathEnd)
 		}
 
-		router(&w, &r)
+		wp := (*Response)(Noescape(unsafe.Pointer(&w)))
+		rp := (*Request)(Noescape(unsafe.Pointer(&r)))
+
+		router(wp, rp)
 		switch w.Code {
 		case StatusOK:
 			responseBuffer = append(responseBuffer, []byte("HTTP/1.1 200 OK\r\nConnection: close\r\n")...)
