@@ -62,10 +62,10 @@ case $1 in
 		run go build -o $PROJECT -asmflags="-I /usr/include" -ldflags='-s -w'
 		mv main_back main.go
 
-		echo "Profiling for 300 seconds..."
+		echo "Profiling for 30 seconds..."
 		./$PROJECT &
 		PID=$!
-		run curl -o cpu.pprof "http://localhost:9090/debug/pprof/profile?seconds=300" 2>/dev/null
+		run curl -o cpu.pprof "http://localhost:9090/debug/pprof/profile?seconds=30" 2>/dev/null
 		kill $PID
 		;;
 	vet)

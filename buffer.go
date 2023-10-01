@@ -4,6 +4,7 @@ import (
 	"unsafe"
 )
 
+/* TODO(anton2920): I need to write tests for this... */
 type CircularBuffer struct {
 	Buf   []byte
 	Start int
@@ -27,9 +28,7 @@ const (
 )
 
 func (cb *CircularBuffer) FillFrom(fd int32) int {
-	start := min(cb.Pos, cb.End)
-
-	ret := int(Read(fd, cb.Buf[start:]))
+	ret := int(Read(fd, cb.Buf[cb.End:cb.Start+len(cb.Buf)/2]))
 	if ret > 0 {
 		cb.End += ret
 	}
