@@ -33,7 +33,7 @@ STARTTIME=`date +%s`
 
 case $1 in
 	'' | debug)
-		run go build -o rant -race -gcflags='all=-N -l' -asmflags='-I /usr/include'
+		run go build -o $PROJECT -race -gcflags='all=-N -l' -asmflags='-I /usr/include'
 		echo "Don't forget to clean up `go env GOCACHE` directory!"
 		;;
 	all)
@@ -53,6 +53,20 @@ case $1 in
 		else
 			run gofmt -l -s -w *.go
 		fi
+		;;
+	prof | profile)
+		cp main.go main_back
+		sed -e '3a\'$'\n''import _ "net/http/pprof"' -e '3a\'$'\n''import "net/http"' -e '/func main/a\'$'\n''go http.ListenAndServe(":9090", nil)' main.go >new_main
+		mv new_main main.go
+
+		run go build -o $PROJECT -asmflags="-I /usr/include" -ldflags='-s -w'
+		mv main_back main.go
+
+		echo "Profiling for 30 seconds..."
+		./$PROJECT &
+		PID=$!
+		run curl -o cpu.pprof "http://localhost:9090/debug/pprof/profile?seconds=120" 2>/dev/null
+		kill $PID
 		;;
 	vet)
 		run go vet
