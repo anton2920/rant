@@ -9,8 +9,12 @@ type E struct {
 
 const (
 	/* From <errno.h>. */
-	ENOENT = 2
-	EINTR  = 4
+	ENOENT      = 2
+	EINTR       = 4
+	ECONNRESET  = 54
+	EAGAIN      = 35
+	EWOULDBLOCK = EAGAIN
+	ETIMEDOUT   = 60
 )
 
 func (e E) Error() string {

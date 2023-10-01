@@ -56,7 +56,7 @@ func ReadTweets() error {
 		if ret := Fstat(fd, &st); ret < 0 {
 			return NewError("Failed to get stat of '"+string(pathBuf[:])+"': ", int(ret))
 		}
-		tm := TimeToTm(st.Birthtime.Sec)
+		tm := TimeToTm(int(st.Birthtime.Sec))
 		dateBufLen = SlicePutTm(unsafe.Slice(&dateBuf[0], len(dateBuf)), tm)
 
 		if text, err = ReadEntireFile(fd); err != nil {

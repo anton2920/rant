@@ -14,7 +14,11 @@ type Tm struct {
 }
 
 type Timespec struct {
-	Sec, Nsec int
+	Sec, Nsec int64
+}
+
+type Timeval struct {
+	Sec, Usec int64
 }
 
 func TimeToTm(t int) Tm {

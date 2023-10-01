@@ -8,7 +8,7 @@ type PageDescription struct {
 }
 
 var (
-	Pages       [10][]byte
+	Pages       [15][]byte
 	PageKevents []Kevent_t
 )
 

@@ -1,12 +1,13 @@
 package main
 
 import (
-	"runtime"
 	"unsafe"
 )
 
 type Request struct {
-	URL URL
+	Method  string
+	URL     URL
+	Version string
 }
 
 type Response struct {
@@ -24,76 +25,229 @@ const (
 )
 
 const (
-	ResponseBadRequest = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n<!DOCTYPE html><head><title>400 Bad Request</title></head><body><h1>400 Bad Request</h1><p>Your browser sent a request that this server could not understand.</p></body></html>"
-	ResponseNotFound   = "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n<!DOCTYPE html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1><p>The requested URL was not found on this server.</p></body></html>"
+	ResponseBadRequest            = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\nContent-Length: 175\r\nConnection: close\r\n\r\n<!DOCTYPE html><head><title>400 Bad Request</title></head><body><h1>400 Bad Request</h1><p>Your browser sent a request that this server could not understand.</p></body></html>"
+	ResponseNotFound              = "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\nContent-Length: 152\r\nConnection: close\r\n\r\n<!DOCTYPE html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1><p>The requested URL was not found on this server.</p></body></html>"
+	ResponseMethodNotAllowed      = "HTTP/1.1 405 Method Not Allowed\r\nContent-Type: text/html\r\nContent-Length: ...\r\nConnection: close\r\n\r\n"
+	ResponseRequestTimeout        = "HTTP/1.1 408 Request Timeout\r\nContent-Type: text/html\r\nContent-Length: ...\r\nConnection: close\r\n\r\n"
+	ResponseRequestEntityTooLarge = "HTTP/1.1 413 Request Entity Too Large\r\nContent-Type: text/html\r\nConent-Length: ...\r\nConnection: close\r\n\r\n"
+)
+
+const (
+	HeaderContentLength = `Content-Length: `
+)
+
+const (
+	STATE_UNKNOWN = iota
+	STATE_NEED_MORE
+	STATE_METHOD
+	STATE_URI
+	STATE_VERSION
+	STATE_HEADER
+	STATE_BODY
+
+	STATE_BAD_REQUEST
+	STATE_METHOD_NOT_ALLOWED
+	STATE_REQUEST_TIMEOUT
+	STATE_REQUEST_ENTITY_TOO_LARGE
+
+	STATE_DONE
 )
 
 func HTTPWorker(cc <-chan int32, router HTTPRouter) {
-	var requestBuffer [512]byte
-	var responseBuffer []byte
+	const maxResponseOffset = 128
+
+	var contentLengthBuf []byte
+	var respB, respBView []byte
+	var reqB Buffer
 
 	var w Response
 	var r Request
-	w.Body = make([]byte, 0, 32*1024)
 
-	responseBuffer = make([]byte, 0, 64*1024)
+	var currState, prevState int
+
+	contentLengthBuf = make([]byte, len(HeaderContentLength)+10)
+	copy(contentLengthBuf, []byte(HeaderContentLength))
+
+	respB = make([]byte, 64*1024)
 
 	for c := range cc {
-		responseBuffer = responseBuffer[:0]
-		w.Body = w.Body[:0]
-		w.ContentType = ""
+	connectionFor:
+		for {
+			reqB.Reset()
+			currState = STATE_NEED_MORE
+			prevState = STATE_METHOD
 
-		Read(c, unsafe.Slice(&requestBuffer[0], len(requestBuffer)))
-		if unsafe.String(&requestBuffer[0], 3) != "GET" {
-			WriteFull(c, []byte(ResponseBadRequest))
-			Close(c)
-			continue
-		}
+			w.Body = respB[maxResponseOffset:maxResponseOffset]
+			w.ContentType = ""
+			w.Code = 0
 
-		lineEnd := FindChar(unsafe.String(&requestBuffer[4], len(requestBuffer)-4), '\r')
-		requestLine := unsafe.String(&requestBuffer[4], lineEnd-1) /* without method. */
+			for currState != STATE_DONE {
+				switch currState {
+				case STATE_UNKNOWN:
+					remaining := reqB.RemainingString()
+					if len(remaining) < 2 {
+						prevState = STATE_UNKNOWN
+						currState = STATE_NEED_MORE
+						continue
+					}
+					if remaining[:2] == "\r\n" {
+						reqB.Consume(len("\r\n"))
+						currState = STATE_DONE
+					} else {
+						currState = STATE_HEADER
+					}
 
-		pathEnd := FindChar(requestLine, '?')
-		if pathEnd != -1 {
-			/* With query. */
-			r.URL.Path = unsafe.String(unsafe.StringData(requestLine), pathEnd)
+				case STATE_NEED_MORE:
+					if reqB.Len == len(reqB.Buf) {
+						currState = STATE_REQUEST_ENTITY_TOO_LARGE
+						continue
+					}
+					n := reqB.FillFrom(c)
+					if n <= 0 {
+						switch -n {
+						case 0:
+							/* End of file. */
+						case ECONNRESET:
+							/* Connection reset by peer. */
+						case EWOULDBLOCK:
+							if prevState != STATE_METHOD {
+								prevState = STATE_REQUEST_TIMEOUT
+							}
+							Shutdown(c, SHUT_RD)
+						default:
+							println("ERROR: failed to fiil buffer: ", n)
+						}
+						break connectionFor
+					}
+					currState = prevState
+					prevState = STATE_UNKNOWN
+				case STATE_METHOD:
+					remaining := reqB.RemainingString()
+					if len(remaining) < 3 {
+						prevState = STATE_METHOD
+						currState = STATE_NEED_MORE
+						continue
+					}
+					switch remaining[:3] {
+					case "GET":
+						r.Method = "GET"
+					default:
+						currState = STATE_METHOD_NOT_ALLOWED
+						continue
+					}
+					reqB.Consume(len(r.Method) + 1)
+					currState = STATE_URI
+				case STATE_URI:
+					remaining := reqB.RemainingString()
+					lineEnd := FindChar(remaining, '\r')
+					if lineEnd == -1 {
+						prevState = STATE_URI
+						currState = STATE_NEED_MORE
+						continue
+					}
 
-			queryStart := pathEnd + 1
-			queryEnd := FindChar(unsafe.String((*byte)(unsafe.Add(unsafe.Pointer(unsafe.StringData(requestLine)), queryStart)), len(requestLine)-queryStart), ' ')
-			r.URL.Query = unsafe.String((*byte)(unsafe.Add(unsafe.Pointer(unsafe.StringData(requestLine)), queryStart)), queryEnd)
-		} else {
-			/* Without query. */
-			pathEnd = FindChar(requestLine, ' ')
-			r.URL.Path = unsafe.String(unsafe.StringData(requestLine), pathEnd)
-		}
+					uriEnd := FindChar(remaining[:lineEnd], ' ')
+					if uriEnd == -1 {
+						currState = STATE_BAD_REQUEST
+						continue
+					}
 
-		wp := (*Response)(Noescape(unsafe.Pointer(&w)))
-		rp := (*Request)(Noescape(unsafe.Pointer(&r)))
+					queryStart := FindChar(remaining[:lineEnd], '?')
+					if queryStart != -1 {
+						r.URL.Path = remaining[:queryStart]
+						r.URL.Query = remaining[queryStart+1 : uriEnd]
+					} else {
+						r.URL.Path = remaining[:uriEnd]
+						r.URL.Query = ""
+					}
 
-		router(wp, rp)
-		switch w.Code {
-		case StatusOK:
-			responseBuffer = append(responseBuffer, []byte("HTTP/1.1 200 OK\r\nConnection: close\r\n")...)
-			switch w.ContentType {
-			case "", "text/html":
-				responseBuffer = append(responseBuffer, []byte("Content-Type: text/html\r\n\r\n")...)
-			case "image/jpg":
-				responseBuffer = append(responseBuffer, []byte("Content-Type: image/jpg\r\nCache-Control: max-age=604800\r\n\r\n")...)
-			case "application/rss+xml":
-				responseBuffer = append(responseBuffer, []byte("Content-Type: application/rss+xml\r\n\r\n")...)
-			case "image/png":
-				responseBuffer = append(responseBuffer, []byte("Content-Type: image/png\r\nCache-Control: max-age=604800\r\n\r\n")...)
-			default:
-				panic("unknown Content-Type '" + w.ContentType + "'")
+					const httpVersionPrefix = "HTTP/"
+					httpVersion := remaining[uriEnd+1 : lineEnd]
+					if httpVersion[:len(httpVersionPrefix)] != httpVersionPrefix {
+						currState = STATE_BAD_REQUEST
+						continue
+					}
+					r.Version = httpVersion[len(httpVersionPrefix):]
+					reqB.Consume(len(r.URL.Path) + len(r.URL.Query) + len(httpVersionPrefix) + len(r.Version) + len("\r\n"))
+					currState = STATE_UNKNOWN
+				case STATE_HEADER:
+					remaining := reqB.RemainingString()
+					lineEnd := FindChar(remaining, '\r')
+					if lineEnd == -1 {
+						prevState = STATE_HEADER
+						currState = STATE_NEED_MORE
+						continue
+					}
+					header := remaining[:lineEnd]
+					reqB.Consume(len(header) + len("\r\n"))
+					currState = STATE_UNKNOWN
+
+				case STATE_BAD_REQUEST:
+					WriteFull(c, []byte(ResponseBadRequest))
+					Close(c)
+					break connectionFor
+				case STATE_METHOD_NOT_ALLOWED:
+					WriteFull(c, []byte(ResponseMethodNotAllowed))
+					Close(c)
+					break connectionFor
+				case STATE_REQUEST_TIMEOUT:
+					WriteFull(c, []byte(ResponseRequestTimeout))
+					Close(c)
+					break connectionFor
+				case STATE_REQUEST_ENTITY_TOO_LARGE:
+					WriteFull(c, []byte(ResponseRequestEntityTooLarge))
+					Close(c)
+					break connectionFor
+
+				default:
+					panic("invalid state")
+				}
 			}
-			responseBuffer = append(responseBuffer, w.Body...)
-		case StatusBadRequest:
-			responseBuffer = append(responseBuffer, ResponseBadRequest...)
-		case StatusNotFound:
-			responseBuffer = append(responseBuffer, ResponseNotFound...)
-		}
 
-		WriteFull(c, responseBuffer)
+			wp := (*Response)(Noescape(unsafe.Pointer(&w)))
+			rp := (*Request)(Noescape(unsafe.Pointer(&r)))
+
+			// runtime.Breakpoint()
+
+			router(wp, rp)
+			switch w.Code {
+			case StatusOK:
+				if cap(w.Body) > cap(respB) {
+					respB = make([]byte, 4*cap(respB))
+					copy(respB[maxResponseOffset:], w.Body)
+				}
+
+				const statusLine = "HTTP/1.1 200 OK\r\n"
+				var headers string
+				switch w.ContentType {
+				case "", "text/html":
+					headers = "\r\nContent-Type: text/html\r\n\r\n"
+				case "image/jpg":
+					headers = "\r\nContent-Type: image/jpg\r\nCache-Control: max-age=604800\r\n\r\n"
+				case "application/rss+xml":
+					headers = "\r\nContent-Type: application/rss+xml\r\n\r\n"
+				case "image/png":
+					headers = "\r\nContent-Type: image/png\r\nCache-Control: max-age=604800\r\n\r\n"
+				default:
+					panic("unknown Content-Type '" + w.ContentType + "'")
+				}
+
+				nlength := SlicePutPositiveInt(contentLengthBuf[len(HeaderContentLength):], len(w.Body))
+				contentLengthHeader := contentLengthBuf[:len(HeaderContentLength)+nlength]
+
+				offset := len(statusLine) + len(contentLengthHeader) + len(headers)
+				respBView = respB[maxResponseOffset-offset : maxResponseOffset+len(w.Body)]
+
+				copy(respBView, []byte(statusLine))
+				copy(respBView[len(statusLine):], contentLengthHeader)
+				copy(respBView[len(statusLine)+len(contentLengthHeader):], headers)
+			case StatusBadRequest:
+				respBView = unsafe.Slice(unsafe.StringData(ResponseBadRequest), len(ResponseBadRequest))
+			case StatusNotFound:
+				respBView = unsafe.Slice(unsafe.StringData(ResponseNotFound), len(ResponseNotFound))
+			}
+			WriteFull(c, respBView)
+		}
 		Shutdown(c, SHUT_WR)
 		Close(c)
 	}
@@ -117,21 +271,28 @@ func ListenAndServe(port uint16, router HTTPRouter) error {
 	}
 
 	const backlog = 128
-	if ret = Listen(l, backlog); ret != 0 {
+	if ret = Listen(l, backlog); ret < 0 {
 		return NewError("Failed to listen on the socket: ", int(ret))
 	}
 
 	cc := make(chan int32)
-	for i := 0; i < runtime.GOMAXPROCS(0); i++ {
+	for i := 0; i < 1; i++ {
 		go HTTPWorker(cc, router)
 	}
+
+	readTimeout := Timeval{Sec: 4}
 
 	for {
 		var c int32
 		var addr SockAddrIn
 		var addrLen uint32 = uint32(unsafe.Sizeof(addr))
 		if c = Accept(l, &addr, &addrLen); c < 0 {
+			println("ERROR: failed to accept incoming connection: ", c)
 			continue
+		}
+
+		if ret = Setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, unsafe.Pointer(&readTimeout), uint32(unsafe.Sizeof(readTimeout))); ret < 0 {
+			return NewError("Failed to set socket read timeout: ", int(ret))
 		}
 
 		cc <- c
