@@ -2,6 +2,9 @@ package main
 
 import "unsafe"
 
+/* NOTE(anton2920): assuming 4 KiB page size. */
+const PageSize = 4096
+
 var (
 	IndexPage    *[]byte
 	TweetPage    *[]byte

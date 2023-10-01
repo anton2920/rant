@@ -49,6 +49,16 @@ func Fstat(fd int32, sb *Stat) (ret int32) {
 }
 
 //go:noescape
+func RawFtruncate(fd int32, length int64) int32
+
+func Ftruncate(fd int32, length int64) (ret int32) {
+	SyscallEnter()
+	ret = RawFtruncate(fd, length)
+	SyscallExit()
+	return
+}
+
+//go:noescape
 //go:nosplit
 func RawKevent(kq int32, changelist []Kevent_t, eventlist []Kevent_t, timeout *Timespec) int32
 
@@ -85,6 +95,17 @@ func RawLseek(fd int32, offset int64, whence int32) int64
 func Lseek(fd int32, offset int64, whence int32) (ret int64) {
 	SyscallEnter()
 	ret = RawLseek(fd, offset, whence)
+	SyscallExit()
+	return
+}
+
+//go:noescape
+//go:nosplit
+func RawMmap(addr unsafe.Pointer, len uint64, prot, flags, fd int32, offset int64) unsafe.Pointer
+
+func Mmap(addr unsafe.Pointer, len uint64, prot, flags, fd int32, offset int64) (ret unsafe.Pointer) {
+	SyscallEnter()
+	ret = RawMmap(addr, len, prot, flags, fd, offset)
 	SyscallExit()
 	return
 }
@@ -129,6 +150,17 @@ func RawSetsockopt(s, level, optname int32, optval unsafe.Pointer, optlen uint32
 func Setsockopt(s, level, optname int32, optval unsafe.Pointer, optlen uint32) (ret int32) {
 	SyscallEnter()
 	ret = RawSetsockopt(s, level, optname, optval, optlen)
+	SyscallExit()
+	return
+}
+
+//go:noescape
+//go:nosplit
+func RawShmOpen2(path string, flags int32, mode uint16, shmflags int32, name unsafe.Pointer) int32
+
+func ShmOpen(path string, flags int32, mode uint16) (ret int32) {
+	SyscallEnter()
+	ret = RawShmOpen2(path, flags|O_CLOEXEC, mode, 0, nil)
 	SyscallExit()
 	return
 }

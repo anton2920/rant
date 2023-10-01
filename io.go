@@ -2,7 +2,9 @@ package main
 
 const (
 	/* From <fcntl.h>. */
-	O_RDONLY = 0
+	O_RDONLY  = 0x0000
+	O_RDWR    = 0x0002
+	O_CLOEXEC = 0x00100000
 
 	SEEK_SET = 0
 	SEEK_END = 2

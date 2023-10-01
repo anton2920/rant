@@ -57,6 +57,17 @@ TEXT main·RawFstat(SB), NOSPLIT, $0-12
 	MOVL AX, ret+16(FP)
 	RET
 
+/* func RawFtruncate(fd int32, length int64) int32 */
+TEXT main·RawFtruncate(SB), NOSPLIT, $0-12
+	MOVQ $SYS_ftruncate, AX
+	MOVL fd+0(FP), DI
+	MOVQ len+8(FP), SI
+	SYSCALL
+	JCC 2(PC)
+	NEGL AX
+	MOVL AX, ret+16(FP)
+	RET
+
 /* func RawKevent(kq int32, changelist []Kevent, eventlist []Kevent, timeout *Timespec) int32 */
 TEXT main·RawKevent(SB), NOSPLIT, $0-60
 	MOVQ $SYS_kevent, AX
@@ -104,6 +115,20 @@ TEXT main·RawLseek(SB), NOSPLIT, $0-16
 	MOVQ AX, ret+24(FP)
 	RET
 
+TEXT main·RawMmap(SB), NOSPLIT, $0-36
+	MOVQ $SYS_mmap, AX
+	MOVQ addr+0(FP), DI
+	MOVQ len+8(FP), SI
+	MOVL prot+16(FP), DX
+	MOVL flags+20(FP), R10
+	MOVL fd+24(FP), R8
+	MOVQ offset+32(FP), R9
+	SYSCALL
+	JCC 2(PC)
+	NEGQ AX
+	MOVQ AX, ret+40(FP)
+	RET
+
 /* func RawNanosleep(rqtp, rmtp *Timespec) int32 */
 TEXT main·RawNanosleep(SB), NOSPLIT, $0-16
 	MOVQ $SYS_nanosleep, AX
@@ -123,8 +148,8 @@ TEXT main·RawOpen(SB), NOSPLIT, $0-22
 	MOVW mode+20(FP), DX
 	SYSCALL
 	JCC 2(PC)
-	NEGQ AX
-	MOVQ AX, ret+24(FP)
+	NEGL AX
+	MOVL AX, ret+24(FP)
 	RET
 
 /* func RawRead(fd int32, buf []byte) int64 */
@@ -151,6 +176,20 @@ TEXT main·RawSetsockopt(SB), NOSPLIT, $0-24
 	JCC 2(PC)
 	NEGL AX
 	MOVL AX, ret+32(FP)
+	RET
+
+/* func RawShmOpen2(path string, flags int32, mode uint16, shmflags int32, name unsafe.Pointer) int32 */
+TEXT main·RawShmOpen2(SB), NOSPLIT, $0-42
+	MOVQ $SYS_shm_open2, AX
+	MOVQ path+0(FP), DI
+	MOVL flags+16(FP), SI
+	MOVW mode+20(FP), DX
+	MOVL shmflags+24(FP), R10
+	MOVQ name+32(FP), R8
+	SYSCALL
+	JCC 2(PC)
+	NEGL AX
+	MOVL AX, ret+40(FP)
 	RET
 
 /* func RawShutdown(s int32, how int32) int32 */

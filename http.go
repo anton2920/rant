@@ -56,12 +56,14 @@ const (
 func HTTPWorker(cc <-chan int32, router HTTPRouter) {
 	const maxResponseOffset = 128
 
+	var err error
+
+	var reqB *CircularBuffer
+	var r Request
+
 	var contentLengthBuf []byte
 	var respB, respBView []byte
-	var reqB Buffer
-
 	var w Response
-	var r Request
 
 	var currState, prevState int
 
@@ -69,6 +71,10 @@ func HTTPWorker(cc <-chan int32, router HTTPRouter) {
 	copy(contentLengthBuf, []byte(HeaderContentLength))
 
 	respB = make([]byte, 64*1024)
+
+	if reqB, err = NewCircularBuffer(PageSize); err != nil {
+		FatalError(err)
+	}
 
 	for c := range cc {
 	connectionFor:
@@ -84,7 +90,7 @@ func HTTPWorker(cc <-chan int32, router HTTPRouter) {
 			for currState != STATE_DONE {
 				switch currState {
 				case STATE_UNKNOWN:
-					remaining := reqB.RemainingString()
+					remaining := reqB.UnconsumedString()
 					if len(remaining) < 2 {
 						prevState = STATE_UNKNOWN
 						currState = STATE_NEED_MORE
@@ -98,7 +104,7 @@ func HTTPWorker(cc <-chan int32, router HTTPRouter) {
 					}
 
 				case STATE_NEED_MORE:
-					if reqB.Len == len(reqB.Buf) {
+					if reqB.SpaceLeft() == 0 {
 						currState = STATE_REQUEST_ENTITY_TOO_LARGE
 						continue
 					}
@@ -122,7 +128,7 @@ func HTTPWorker(cc <-chan int32, router HTTPRouter) {
 					currState = prevState
 					prevState = STATE_UNKNOWN
 				case STATE_METHOD:
-					remaining := reqB.RemainingString()
+					remaining := reqB.UnconsumedString()
 					if len(remaining) < 3 {
 						prevState = STATE_METHOD
 						currState = STATE_NEED_MORE
@@ -138,7 +144,7 @@ func HTTPWorker(cc <-chan int32, router HTTPRouter) {
 					reqB.Consume(len(r.Method) + 1)
 					currState = STATE_URI
 				case STATE_URI:
-					remaining := reqB.RemainingString()
+					remaining := reqB.UnconsumedString()
 					lineEnd := FindChar(remaining, '\r')
 					if lineEnd == -1 {
 						prevState = STATE_URI
@@ -171,7 +177,7 @@ func HTTPWorker(cc <-chan int32, router HTTPRouter) {
 					reqB.Consume(len(r.URL.Path) + len(r.URL.Query) + len(httpVersionPrefix) + len(r.Version) + len("\r\n"))
 					currState = STATE_UNKNOWN
 				case STATE_HEADER:
-					remaining := reqB.RemainingString()
+					remaining := reqB.UnconsumedString()
 					lineEnd := FindChar(remaining, '\r')
 					if lineEnd == -1 {
 						prevState = STATE_HEADER
