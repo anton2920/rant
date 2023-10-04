@@ -27,35 +27,6 @@ const (
 	MAP_ANONYMOUS = MAP_ANON
 )
 
-func (cb *CircularBuffer) FillFrom(fd int32) int {
-	ret := int(Read(fd, cb.Buf[cb.End:cb.Start+len(cb.Buf)/2]))
-	if ret > 0 {
-		cb.End += ret
-	}
-	return ret
-}
-
-func (cb *CircularBuffer) Reset() {
-	cb.Start = cb.Pos
-	if cb.Start > len(cb.Buf)/2 {
-		cb.Start -= len(cb.Buf) / 2
-		cb.Pos -= len(cb.Buf) / 2
-		cb.End -= len(cb.Buf) / 2
-	}
-}
-
-func (cb *CircularBuffer) SpaceLeft() int {
-	return len(cb.Buf) - (cb.End - cb.Start)
-}
-
-func (cb *CircularBuffer) Consume(n int) {
-	cb.Pos += n
-}
-
-func (cb *CircularBuffer) UnconsumedString() string {
-	return unsafe.String(&cb.Buf[cb.Pos], max(cb.End-cb.Pos, 0))
-}
-
 func NewCircularBuffer(size int) (*CircularBuffer, error) {
 	var buffer, rb unsafe.Pointer
 	var fd, ret int32
@@ -95,4 +66,81 @@ func NewCircularBuffer(size int) (*CircularBuffer, error) {
 	cb.Buf[size] = '\x00'
 
 	return cb, nil
+}
+
+/* Here socket is producer and application is consumer. */
+func (cb *CircularBuffer) ReadFrom(fd int32) int {
+	n := int(Read(fd, cb.RemainingSlice()))
+	if n > 0 {
+		cb.Produce(n)
+	}
+	return n
+}
+
+/* TODO(anton2920): rename 'Reset.+'. */
+/* ResetReader increases RemainingSpace, allowing older data to be overwritten. */
+func (cb *CircularBuffer) ResetReader() {
+	cb.Start = cb.Pos
+	if cb.Start > len(cb.Buf)/2 {
+		cb.Start -= len(cb.Buf) / 2
+		cb.Pos -= len(cb.Buf) / 2
+		cb.End -= len(cb.Buf) / 2
+	}
+}
+
+func (cb *CircularBuffer) Consume(n int) {
+	cb.Pos += n
+}
+
+func (cb *CircularBuffer) UnconsumedLen() int {
+	return max(cb.End-cb.Pos, 0)
+}
+
+func (cb *CircularBuffer) UnconsumedSlice() []byte {
+	return unsafe.Slice(&cb.Buf[cb.Pos], cb.UnconsumedLen())
+}
+
+func (cb *CircularBuffer) UnconsumedString() string {
+	return unsafe.String(&cb.Buf[cb.Pos], cb.UnconsumedLen())
+}
+
+/* Here application is producer and socket is consumer. */
+func (cb *CircularBuffer) WriteTo(fd int32) int {
+	n := int(WriteFull(fd, cb.UnconsumedSlice()))
+	if n > 0 {
+		cb.Consume(n)
+	}
+	return n
+}
+
+func (cb *CircularBuffer) FullWriteTo(fd int32) int {
+	ret := int(WriteFull(fd, cb.UnconsumedSlice()))
+	if ret > 0 {
+		cb.Start = 0
+		cb.Pos = 0
+		cb.End = 0
+	}
+	return ret
+}
+
+/* ResetWriter consumes all remaining data. */
+func (cb *CircularBuffer) ResetWriter() {
+	cb.Pos = cb.End
+	if cb.Pos > len(cb.Buf)/2 {
+		cb.Pos -= len(cb.Buf) / 2
+		cb.End -= len(cb.Buf) / 2
+	}
+}
+
+func (cb *CircularBuffer) Produce(n int) {
+	cb.End += n
+}
+
+func (cb *CircularBuffer) RemainingSpace() int {
+	return (len(cb.Buf) / 2) - (cb.End - cb.Start)
+}
+
+/* RemainingSlice returns slice of remaining free space in buffer. */
+func (cb *CircularBuffer) RemainingSlice() []byte {
+	return cb.Buf[cb.End : cb.Start+len(cb.Buf)/2]
 }

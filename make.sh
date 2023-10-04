@@ -33,7 +33,7 @@ STARTTIME=`date +%s`
 
 case $1 in
 	'' | debug)
-		run go build -o $PROJECT -race -gcflags='all=-N -l' -asmflags='-I /usr/include'
+		run go build -o $PROJECT -race -gcflags='all=-N -l -d=checkptr=0' -asmflags='-I /usr/include'
 		echo "Don't forget to clean up `go env GOCACHE` directory!"
 		;;
 	all)
@@ -62,10 +62,10 @@ case $1 in
 		run go build -o $PROJECT -asmflags="-I /usr/include" -ldflags='-s -w'
 		mv main_back main.go
 
-		echo "Profiling for 30 seconds..."
+		echo "Profiling for 60 seconds..."
 		./$PROJECT &
 		PID=$!
-		run curl -o cpu.pprof "http://localhost:9090/debug/pprof/profile?seconds=30" 2>/dev/null
+		run curl -o cpu.pprof "http://localhost:9090/debug/pprof/profile?seconds=60" 2>/dev/null
 		kill $PID
 		;;
 	vet)

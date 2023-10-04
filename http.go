@@ -39,6 +39,8 @@ const (
 const (
 	STATE_UNKNOWN = iota
 	STATE_NEED_MORE
+	STATE_NEED_FLUSH
+
 	STATE_METHOD
 	STATE_URI
 	STATE_VERSION
@@ -55,6 +57,7 @@ const (
 
 func HTTPWorker(cc <-chan int32, router HTTPRouter) {
 	const maxResponseOffset = 128
+	const pipelining = true
 
 	var err error
 
@@ -62,7 +65,7 @@ func HTTPWorker(cc <-chan int32, router HTTPRouter) {
 	var r Request
 
 	var contentLengthBuf []byte
-	var respB, respBView []byte
+	var respB *CircularBuffer
 	var w Response
 
 	var currState, prevState int
@@ -70,20 +73,30 @@ func HTTPWorker(cc <-chan int32, router HTTPRouter) {
 	contentLengthBuf = make([]byte, len(HeaderContentLength)+10)
 	copy(contentLengthBuf, []byte(HeaderContentLength))
 
-	respB = make([]byte, 64*1024)
-
-	if reqB, err = NewCircularBuffer(PageSize); err != nil {
+	if reqB, err = NewCircularBuffer(10 * PageSize); err != nil {
 		FatalError(err)
 	}
 
+	if respB, err = NewCircularBuffer(1024 * PageSize); err != nil {
+		FatalError(err)
+	}
+
+	w.Body = make([]byte, 64*1024)
+
 	for c := range cc {
+		respB.ResetWriter()
+		respB.ResetReader()
+
 	connectionFor:
 		for {
-			reqB.Reset()
-			currState = STATE_NEED_MORE
-			prevState = STATE_METHOD
+			reqB.ResetReader()
+			currState = STATE_METHOD
 
-			w.Body = respB[maxResponseOffset:maxResponseOffset]
+			if pipelining {
+				w.Body = w.Body[:0]
+			} else {
+				w.Body = respB.RemainingSlice()[maxResponseOffset:maxResponseOffset]
+			}
 			w.ContentType = ""
 			w.Code = 0
 
@@ -104,11 +117,17 @@ func HTTPWorker(cc <-chan int32, router HTTPRouter) {
 					}
 
 				case STATE_NEED_MORE:
-					if reqB.SpaceLeft() == 0 {
+					if reqB.RemainingSpace() == 0 {
 						currState = STATE_REQUEST_ENTITY_TOO_LARGE
 						continue
 					}
-					n := reqB.FillFrom(c)
+
+					if pipelining && respB.UnconsumedLen() > 0 {
+						currState = STATE_NEED_FLUSH
+						continue
+					}
+
+					n := reqB.ReadFrom(c)
 					if n <= 0 {
 						switch -n {
 						case 0:
@@ -121,7 +140,24 @@ func HTTPWorker(cc <-chan int32, router HTTPRouter) {
 							}
 							Shutdown(c, SHUT_RD)
 						default:
-							println("ERROR: failed to fiil buffer: ", n)
+							println("ERROR: failed to read buffer: ", n)
+						}
+						break connectionFor
+					}
+					currState = prevState
+					prevState = STATE_UNKNOWN
+				case STATE_NEED_FLUSH:
+					n := respB.FullWriteTo(c)
+					if n <= 0 {
+						switch -n {
+						case 0:
+							/* End of file. */
+						case EPIPE:
+							/* Broken pipe. */
+						case ECONNRESET:
+							/* Connection reset by peer */
+						default:
+							println("ERROR: failed to write buffer: ", n)
 						}
 						break connectionFor
 					}
@@ -174,7 +210,7 @@ func HTTPWorker(cc <-chan int32, router HTTPRouter) {
 						continue
 					}
 					r.Version = httpVersion[len(httpVersionPrefix):]
-					reqB.Consume(len(r.URL.Path) + len(r.URL.Query) + len(httpVersionPrefix) + len(r.Version) + len("\r\n"))
+					reqB.Consume(len(r.URL.Path) + len(r.URL.Query) + 1 + len(httpVersionPrefix) + len(r.Version) + len("\r\n"))
 					currState = STATE_UNKNOWN
 				case STATE_HEADER:
 					remaining := reqB.UnconsumedString()
@@ -189,20 +225,33 @@ func HTTPWorker(cc <-chan int32, router HTTPRouter) {
 					currState = STATE_UNKNOWN
 
 				case STATE_BAD_REQUEST:
+					if pipelining && respB.UnconsumedLen() > 0 {
+						currState = STATE_NEED_FLUSH
+						continue
+					}
 					WriteFull(c, []byte(ResponseBadRequest))
 					Close(c)
 					break connectionFor
 				case STATE_METHOD_NOT_ALLOWED:
+					if pipelining && respB.UnconsumedLen() > 0 {
+						currState = STATE_NEED_FLUSH
+						continue
+					}
 					WriteFull(c, []byte(ResponseMethodNotAllowed))
-					Close(c)
 					break connectionFor
 				case STATE_REQUEST_TIMEOUT:
+					if pipelining && respB.UnconsumedLen() > 0 {
+						currState = STATE_NEED_FLUSH
+						continue
+					}
 					WriteFull(c, []byte(ResponseRequestTimeout))
-					Close(c)
 					break connectionFor
 				case STATE_REQUEST_ENTITY_TOO_LARGE:
+					if pipelining && respB.UnconsumedLen() > 0 {
+						currState = STATE_NEED_FLUSH
+						continue
+					}
 					WriteFull(c, []byte(ResponseRequestEntityTooLarge))
-					Close(c)
 					break connectionFor
 
 				default:
@@ -218,11 +267,6 @@ func HTTPWorker(cc <-chan int32, router HTTPRouter) {
 			router(wp, rp)
 			switch w.Code {
 			case StatusOK:
-				if cap(w.Body) > cap(respB) {
-					respB = make([]byte, 4*cap(respB))
-					copy(respB[maxResponseOffset:], w.Body)
-				}
-
 				const statusLine = "HTTP/1.1 200 OK\r\n"
 				var headers string
 				switch w.ContentType {
@@ -242,17 +286,51 @@ func HTTPWorker(cc <-chan int32, router HTTPRouter) {
 				contentLengthHeader := contentLengthBuf[:len(HeaderContentLength)+nlength]
 
 				offset := len(statusLine) + len(contentLengthHeader) + len(headers)
-				respBView = respB[maxResponseOffset-offset : maxResponseOffset+len(w.Body)]
+				if offset+len(w.Body) > respB.RemainingSpace() {
+					/* NOTE(anton2920): at this point w.Body is no longer a slice of respB.Buf. */
+					println("Sizes:", respB.RemainingSpace(), offset+len(w.Body))
+					println(respB.Start, respB.Pos, respB.End)
+					panic("increase response buffer size")
+				}
 
-				copy(respBView, []byte(statusLine))
-				copy(respBView[len(statusLine):], contentLengthHeader)
-				copy(respBView[len(statusLine)+len(contentLengthHeader):], headers)
+				remaining := respB.RemainingSlice()
+				if !pipelining {
+					remaining = remaining[maxResponseOffset-offset : maxResponseOffset+len(w.Body)]
+				}
+				copy(remaining, []byte(statusLine))
+				copy(remaining[len(statusLine):], contentLengthHeader)
+				copy(remaining[len(statusLine)+len(contentLengthHeader):], headers)
+				if pipelining {
+					copy(remaining[offset:], w.Body)
+					respB.Produce(offset + len(w.Body))
+				} else {
+					respB.Consume(maxResponseOffset - offset)
+					respB.Produce(maxResponseOffset + len(w.Body))
+				}
 			case StatusBadRequest:
-				respBView = unsafe.Slice(unsafe.StringData(ResponseBadRequest), len(ResponseBadRequest))
+				WriteFull(c, unsafe.Slice(unsafe.StringData(ResponseBadRequest), len(ResponseBadRequest)))
+				break connectionFor
 			case StatusNotFound:
-				respBView = unsafe.Slice(unsafe.StringData(ResponseNotFound), len(ResponseNotFound))
+				WriteFull(c, unsafe.Slice(unsafe.StringData(ResponseNotFound), len(ResponseNotFound)))
+				break connectionFor
 			}
-			WriteFull(c, respBView)
+
+			if !pipelining {
+				n := respB.FullWriteTo(c)
+				if n <= 0 {
+					switch -n {
+					case 0:
+						/* End of file. */
+					case EPIPE:
+						/* Broken pipe. */
+					case ECONNRESET:
+						/* Connection reset by peer */
+					default:
+						println("ERROR: failed to write buffer: ", n)
+					}
+					break connectionFor
+				}
+			}
 		}
 		Shutdown(c, SHUT_WR)
 		Close(c)
@@ -282,7 +360,7 @@ func ListenAndServe(port uint16, router HTTPRouter) error {
 	}
 
 	cc := make(chan int32)
-	for i := 0; i < 256; i++ {
+	for i := 0; i < 1; i++ {
 		go HTTPWorker(cc, router)
 	}
 

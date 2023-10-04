@@ -11,9 +11,10 @@ const (
 	/* From <errno.h>. */
 	ENOENT      = 2
 	EINTR       = 4
-	ECONNRESET  = 54
+	EPIPE       = 32
 	EAGAIN      = 35
 	EWOULDBLOCK = EAGAIN
+	ECONNRESET  = 54
 	ETIMEDOUT   = 60
 )
 
