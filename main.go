@@ -126,12 +126,12 @@ func main() {
 	}); err != nil {
 		FatalError(err)
 	}
-	// go MonitorPages()
+	go MonitorPages()
 
 	if err := ReadTweets(); err != nil {
 		FatalError(err)
 	}
-	// go MonitorTweets()
+	go MonitorTweets()
 
 	ConstructIndexPage()
 	ConstructRSSPage()

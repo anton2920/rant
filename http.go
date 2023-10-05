@@ -360,7 +360,7 @@ func ListenAndServe(port uint16, router HTTPRouter) error {
 	}
 
 	cc := make(chan int32)
-	for i := 0; i < 1; i++ {
+	for i := 0; i < 8; i++ {
 		go HTTPWorker(cc, router)
 	}
 
