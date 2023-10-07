@@ -16,10 +16,24 @@ type KqueueCb func(Kevent_t) error
 
 const (
 	/* From <sys/event.h>. */
+	EVFILT_READ  = -1
+	EVFILT_WRITE = -2
 	EVFILT_VNODE = -4
-	EV_ADD       = 0x0001
-	EV_CLEAR     = 0x0020
-	NOTE_WRITE   = 0x0002
+	EVFILT_USER  = -11
+
+	EV_ADD      = 0x0001
+	EV_ENABLE   = 0x0004
+	EV_DISABLE  = 0x0008
+	EV_ONESHOT  = 0x0010
+	EV_CLEAR    = 0x0020
+	EV_DISPATCH = 0x0080
+
+	EV_EOF = 0x8000
+
+	NOTE_FFCOPY  = 0xc0000000
+	NOTE_TRIGGER = 0x01000000
+
+	NOTE_WRITE = 0x0002
 )
 
 func KqueueMonitor(eventlist []Kevent_t, cb KqueueCb) error {
