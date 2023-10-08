@@ -2,37 +2,30 @@ package main
 
 import "unsafe"
 
-type SyncPool struct {
-	M     Mutex
+type Pool struct {
 	Items []unsafe.Pointer
-
-	New func() unsafe.Pointer
+	New   func() unsafe.Pointer
 }
 
-func NewSyncPool(size int, newF func() unsafe.Pointer) *SyncPool {
-	ret := new(SyncPool)
-	ret.Items = make([]unsafe.Pointer, 0, size)
+func NewPool(newF func() unsafe.Pointer) *Pool {
+	ret := new(Pool)
+	ret.Items = make([]unsafe.Pointer, 0, 1024)
 	ret.New = newF
 	return ret
 }
 
-func (sp *SyncPool) Get() unsafe.Pointer {
+func (p *Pool) Get() unsafe.Pointer {
 	var item unsafe.Pointer
 
-	sp.M.Lock()
-	if len(sp.Items) > 0 {
-		item = sp.Items[len(sp.Items)-1]
-		sp.Items = sp.Items[:len(sp.Items)-1]
-		sp.M.Unlock()
+	if len(p.Items) > 0 {
+		item = p.Items[len(p.Items)-1]
+		p.Items = p.Items[:len(p.Items)-1]
 	} else {
-		sp.M.Unlock()
-		item = sp.New()
+		item = p.New()
 	}
 	return item
 }
 
-func (sp *SyncPool) Put(item unsafe.Pointer) {
-	sp.M.Lock()
-	sp.Items = append(sp.Items, item)
-	sp.M.Unlock()
+func (p *Pool) Put(item unsafe.Pointer) {
+	p.Items = append(p.Items, item)
 }

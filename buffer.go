@@ -1,15 +1,11 @@
 package main
 
-import (
-	"unsafe"
-)
+import "unsafe"
 
-/* TODO(anton2920): I need to write tests for this... */
 type CircularBuffer struct {
 	Buf  []byte
 	Head int
 	Tail int
-	M    Mutex
 }
 
 const (
@@ -68,18 +64,7 @@ func NewCircularBuffer(size int) (CircularBuffer, error) {
 	return cb, nil
 }
 
-/* Here socket is producer and application is consumer. */
-func (cb *CircularBuffer) ReadFrom(fd int32) int {
-	cb.M.Lock()
-	n := int(Read(fd, cb.remainingSlice()))
-	if n > 0 {
-		cb.produce(n)
-	}
-	cb.M.Unlock()
-	return n
-}
-
-func (cb *CircularBuffer) consume(n int) {
+func (cb *CircularBuffer) Consume(n int) {
 	cb.Head += n
 	if cb.Head > len(cb.Buf)/2 {
 		cb.Head -= len(cb.Buf) / 2
@@ -87,72 +72,31 @@ func (cb *CircularBuffer) consume(n int) {
 	}
 }
 
-func (cb *CircularBuffer) Consume(n int) {
-	cb.M.Lock()
-	cb.consume(n)
-	cb.M.Unlock()
-}
-
-func (cb *CircularBuffer) unconsumedLen() int {
-	return max(cb.Tail-cb.Head, 0)
-}
-
-func (cb *CircularBuffer) UnconsumedLen() int {
-	cb.M.Lock()
-	defer cb.M.Unlock()
-	return cb.unconsumedLen()
-}
-
-func (cb *CircularBuffer) unconsumedSlice() []byte {
-	return unsafe.Slice(&cb.Buf[cb.Head], cb.unconsumedLen())
-}
-
-func (cb *CircularBuffer) UnconsumedSlice() []byte {
-	cb.M.Lock()
-	defer cb.M.Unlock()
-	return cb.unconsumedSlice()
-}
-
-func (cb *CircularBuffer) UnconsumedString() string {
-	cb.M.Lock()
-	defer cb.M.Unlock()
-	return unsafe.String(&cb.Buf[cb.Head], cb.unconsumedLen())
-}
-
-/* Here application is producer and socket is consumer. */
-func (cb *CircularBuffer) WriteTo(fd int32) int {
-	cb.M.Lock()
-	n := int(Write(fd, cb.unconsumedSlice()))
-	if n > 0 {
-		cb.consume(n)
-	}
-	cb.M.Unlock()
-	return n
-}
-
-func (cb *CircularBuffer) produce(n int) {
+func (cb *CircularBuffer) Produce(n int) {
 	cb.Tail += n
 }
 
-func (cb *CircularBuffer) Produce(n int) {
-	cb.M.Lock()
-	cb.produce(n)
-	cb.M.Unlock()
-}
-
-func (cb *CircularBuffer) RemainingSpace() int {
-	cb.M.Lock()
-	defer cb.M.Unlock()
-	return (len(cb.Buf) / 2) - (cb.Tail - cb.Head)
-}
-
-/* remainingSlice returns slice of remaining free space in buffer. */
-func (cb *CircularBuffer) remainingSlice() []byte {
+func (cb *CircularBuffer) RemainingSlice() []byte {
 	return cb.Buf[cb.Tail : cb.Head+len(cb.Buf)/2]
 }
 
-func (cb *CircularBuffer) RemainingSlice() []byte {
-	cb.M.Lock()
-	defer cb.M.Unlock()
-	return cb.remainingSlice()
+func (cb *CircularBuffer) RemainingSpace() int {
+	return (len(cb.Buf) / 2) - (cb.Tail - cb.Head)
+}
+
+func (cb *CircularBuffer) Reset() {
+	cb.Head = 0
+	cb.Tail = 0
+}
+
+func (cb *CircularBuffer) UnconsumedLen() int {
+	return cb.Tail - cb.Head
+}
+
+func (cb *CircularBuffer) UnconsumedSlice() []byte {
+	return unsafe.Slice(&cb.Buf[cb.Head], cb.UnconsumedLen())
+}
+
+func (cb *CircularBuffer) UnconsumedString() string {
+	return unsafe.String(&cb.Buf[cb.Head], cb.UnconsumedLen())
 }

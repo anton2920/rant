@@ -5,14 +5,15 @@ import (
 	"unsafe"
 )
 
-type HTTPRequestParser struct {
-	State int
-}
-
 type HTTPRequest struct {
 	Method  string
 	URL     URL
 	Version string
+}
+
+type HTTPRequestParser struct {
+	State   int
+	Request HTTPRequest
 }
 
 type HTTPResponse struct {
@@ -25,11 +26,7 @@ type HTTPContext struct {
 	RequestBuffer  CircularBuffer
 	ResponseBuffer CircularBuffer
 
-	PendingRequests  SyncQueue
-	PendingResponses SyncQueue
-
-	InProgressRequest *HTTPRequest
-	Parser            HTTPRequestParser
+	Parser HTTPRequestParser
 
 	/* Check must be the same as pointer's bit, if context is in use. */
 	Check uintptr
@@ -77,6 +74,13 @@ const (
 	HTTP_EVENT_WRITEBACK
 )
 
+/* NOTE(anton2920): Noescape hides a pointer from escape analysis. Noescape is the identity function but escape analysis doesn't think the output depends on the input. Noescape is inlined and currently compiles down to zero instructions. */
+//go:nosplit
+func Noescape(p unsafe.Pointer) unsafe.Pointer {
+	x := uintptr(p)
+	return unsafe.Pointer(x ^ 0)
+}
+
 func NewHTTPContext() unsafe.Pointer {
 	var err error
 
@@ -93,16 +97,6 @@ func NewHTTPContext() unsafe.Pointer {
 	return unsafe.Pointer(c)
 }
 
-func NewHTTPRequest() unsafe.Pointer {
-	return unsafe.Pointer(new(HTTPRequest))
-}
-
-func NewHTTPResponse() unsafe.Pointer {
-	w := new(HTTPResponse)
-	w.Body = make([]byte, 16*1024)
-	return unsafe.Pointer(w)
-}
-
 func GetContextAndCheck(ptr unsafe.Pointer) (*HTTPContext, uintptr) {
 	uptr := uintptr(ptr)
 
@@ -112,15 +106,154 @@ func GetContextAndCheck(ptr unsafe.Pointer) (*HTTPContext, uintptr) {
 	return ctx, check
 }
 
-func HTTPWorker(l int32, router HTTPRouter) {
+func HTTPHandleRequests(wBuf *CircularBuffer, rBuf *CircularBuffer, rp *HTTPRequestParser, router HTTPRouter) int {
+	var nreqs int
+
 	var contentLengthBuf []byte
 	contentLengthBuf = make([]byte, len(HTTPHeaderContentLengthPrefix)+10)
 	copy(contentLengthBuf, []byte(HTTPHeaderContentLengthPrefix))
 
+	var w HTTPResponse
+	w.Body = make([]byte, 64*1024)
+
+	r := &rp.Request
+
+	for {
+		for rp.State != HTTP_STATE_DONE {
+			switch rp.State {
+			default:
+				println(rp.State)
+				panic("unknown HTTP parser state")
+			case HTTP_STATE_UNKNOWN:
+				unconsumed := rBuf.UnconsumedString()
+				if len(unconsumed) < 2 {
+					return nreqs
+				}
+				if unconsumed[:2] == "\r\n" {
+					rBuf.Consume(len("\r\n"))
+					rp.State = HTTP_STATE_DONE
+				} else {
+					rp.State = HTTP_STATE_HEADER
+				}
+
+			case HTTP_STATE_METHOD:
+				unconsumed := rBuf.UnconsumedString()
+				if len(unconsumed) < 3 {
+					return nreqs
+				}
+				switch unconsumed[:3] {
+				case "GET":
+					r.Method = "GET"
+				default:
+					copy(wBuf.RemainingSlice(), unsafe.Slice(unsafe.StringData(HTTPResponseMethodNotAllowed), len(HTTPResponseMethodNotAllowed)))
+					wBuf.Produce(len(HTTPResponseMethodNotAllowed))
+					return nreqs + 1
+				}
+				rBuf.Consume(len(r.Method) + 1)
+				rp.State = HTTP_STATE_URI
+			case HTTP_STATE_URI:
+				unconsumed := rBuf.UnconsumedString()
+				lineEnd := FindChar(unconsumed, '\r')
+				if lineEnd == -1 {
+					return nreqs
+				}
+
+				uriEnd := FindChar(unconsumed[:lineEnd], ' ')
+				if uriEnd == -1 {
+					copy(wBuf.RemainingSlice(), unsafe.Slice(unsafe.StringData(HTTPResponseBadRequest), len(HTTPResponseBadRequest)))
+					wBuf.Produce(len(HTTPResponseBadRequest))
+					return nreqs + 1
+				}
+
+				queryStart := FindChar(unconsumed[:lineEnd], '?')
+				if queryStart != -1 {
+					r.URL.Path = unconsumed[:queryStart]
+					r.URL.Query = unconsumed[queryStart+1 : uriEnd]
+				} else {
+					r.URL.Path = unconsumed[:uriEnd]
+					r.URL.Query = ""
+				}
+
+				const httpVersionPrefix = "HTTP/"
+				httpVersion := unconsumed[uriEnd+1 : lineEnd]
+				if httpVersion[:len(httpVersionPrefix)] != httpVersionPrefix {
+					copy(wBuf.RemainingSlice(), unsafe.Slice(unsafe.StringData(HTTPResponseBadRequest), len(HTTPResponseBadRequest)))
+					wBuf.Produce(len(HTTPResponseBadRequest))
+					return nreqs + 1
+				}
+				r.Version = httpVersion[len(httpVersionPrefix):]
+				rBuf.Consume(len(r.URL.Path) + len(r.URL.Query) + 1 + len(httpVersionPrefix) + len(r.Version) + len("\r\n"))
+				rp.State = HTTP_STATE_UNKNOWN
+			case HTTP_STATE_HEADER:
+				unconsumed := rBuf.UnconsumedString()
+				lineEnd := FindChar(unconsumed, '\r')
+				if lineEnd == -1 {
+					return nreqs
+				}
+				header := unconsumed[:lineEnd]
+				rBuf.Consume(len(header) + len("\r\n"))
+				rp.State = HTTP_STATE_UNKNOWN
+			}
+		}
+
+		w.Body = w.Body[:0]
+		w.ContentType = ""
+
+		router((*HTTPResponse)(Noescape(unsafe.Pointer(&w))), r)
+		// println("Executed:", r.Method, r.URL.Path, r.URL.Query, w.Code, w.ContentType, len(w.Body))
+
+		remaining := wBuf.RemainingSlice()
+		switch w.Code {
+		case HTTPStatusOK:
+			const statusLine = "HTTP/1.1 200 OK\r\n"
+			var headers string
+			switch w.ContentType {
+			case "", "text/html":
+				headers = "\r\nContent-Type: text/html\r\n\r\n"
+			case "image/jpg":
+				headers = "\r\nContent-Type: image/jpg\r\nCache-Control: max-age=604800\r\n\r\n"
+			case "application/rss+xml":
+				headers = "\r\nContent-Type: application/rss+xml\r\n\r\n"
+			case "image/png":
+				headers = "\r\nContent-Type: image/png\r\nCache-Control: max-age=604800\r\n\r\n"
+			default:
+				panic("unknown Content-Type '" + w.ContentType + "'")
+			}
+
+			nlength := SlicePutPositiveInt(contentLengthBuf[len(HTTPHeaderContentLengthPrefix):], len(w.Body))
+			contentLengthHeader := contentLengthBuf[:len(HTTPHeaderContentLengthPrefix)+nlength]
+
+			offset := len(statusLine) + len(contentLengthHeader) + len(headers)
+			if offset+len(w.Body) > wBuf.RemainingSpace() {
+				return nreqs
+				println(offset+len(w.Body), ">", wBuf.RemainingSpace())
+				println(wBuf.Head, wBuf.Tail)
+				panic("increase response buffer size")
+			}
+
+			copy(remaining, []byte(statusLine))
+			copy(remaining[len(statusLine):], contentLengthHeader)
+			copy(remaining[len(statusLine)+len(contentLengthHeader):], headers)
+			copy(remaining[offset:], w.Body)
+			wBuf.Produce(offset + len(w.Body))
+		case HTTPStatusBadRequest:
+			copy(remaining, unsafe.Slice(unsafe.StringData(HTTPResponseBadRequest), len(HTTPResponseBadRequest)))
+			wBuf.Produce(len(HTTPResponseBadRequest))
+		case HTTPStatusNotFound:
+			copy(remaining, unsafe.Slice(unsafe.StringData(HTTPResponseNotFound), len(HTTPResponseNotFound)))
+			wBuf.Produce(len(HTTPResponseNotFound))
+		}
+		rp.State = HTTP_STATE_METHOD
+		nreqs++
+	}
+}
+
+func HTTPWorker(l int32, router HTTPRouter) {
 	var pinner runtime.Pinner
 	var events [256]Kevent_t
 	var nevents, i int32
-	var kq, ret int32
+	var kq int32
+	var n int
 
 	runtime.LockOSThread()
 
@@ -128,22 +261,14 @@ func HTTPWorker(l int32, router HTTPRouter) {
 		Fatal("Failed to open kernel queue: ", int(kq))
 	}
 	event := Kevent_t{Ident: uintptr(l), Filter: EVFILT_READ, Flags: EV_ADD | EV_CLEAR}
-	if ret = Kevent(kq, unsafe.Slice(&event, 1), nil, nil); ret < 0 {
+	if ret := Kevent(kq, unsafe.Slice(&event, 1), nil, nil); ret < 0 {
 		Fatal("Failed to add event for listener socket: ", int(ret))
 	}
 
-	ctxPool := NewSyncPool(16*1024, NewHTTPContext)
-	rPool := NewSyncPool(16*1024, NewHTTPRequest)
-	wPool := NewSyncPool(16*1024, NewHTTPResponse)
+	ctxPool := NewPool(NewHTTPContext)
 
 	/* NOTE(anton2920): this is indended to be optimized for high throughput.
 	 * Pipeline consists of following steps:
-	 * 0. Accept: accept new connection.
-	 * 1. Fetch: read bytes from socket.
-	 * 2. Decode: parse bytes and fill HTTPRequest struct.
-	 * 3. Execute: do router(), which fills HTTPResponse struct.
-	 * 4. Writeback: write responses to buffer.
-	 * 5. Retire: flush buffer to socket.
 	 */
 	for {
 		if nevents = Kevent(kq, nil, unsafe.Slice(&events[0], len(events)), nil); nevents < 0 {
@@ -157,6 +282,8 @@ func HTTPWorker(l int32, router HTTPRouter) {
 			c := int32(e.Ident)
 
 			// println("EVENT", e.Ident, e.Filter, e.Fflags&0xF, e.Data)
+
+			// runtime.Breakpoint()
 
 			if c == l {
 				if c = Accept(l, nil, nil); c < 0 {
@@ -173,8 +300,7 @@ func HTTPWorker(l int32, router HTTPRouter) {
 				udata := unsafe.Pointer(uintptr(unsafe.Pointer(ctx)) | ctx.Check)
 				events := [...]Kevent_t{
 					{Ident: uintptr(c), Filter: EVFILT_READ, Flags: EV_ADD | EV_CLEAR, Udata: udata},
-					{Ident: uintptr(c), Filter: EVFILT_USER, Flags: EV_ADD | EV_CLEAR, Fflags: NOTE_FFCOPY},
-					{Ident: uintptr(c), Filter: EVFILT_WRITE, Flags: EV_ADD | EV_CLEAR | EV_DISABLE | EV_DISPATCH, Udata: udata},
+					{Ident: uintptr(c), Filter: EVFILT_WRITE, Flags: EV_ADD | EV_CLEAR, Udata: udata},
 				}
 				if ret := Kevent(kq, unsafe.Slice(&events[0], len(events)), nil, nil); ret < 0 {
 					println("ERROR: failed to add new events to kqueue", ret)
@@ -190,222 +316,54 @@ func HTTPWorker(l int32, router HTTPRouter) {
 				continue
 			}
 
-			if (e.Flags & EV_EOF) != 0 {
-				// println("Client disconnected: ", e.Ident)
-				ctx.Check = 1 - ctx.Check
-				ctxPool.Put(unsafe.Pointer(ctx))
-				Close(c)
-				continue
-			}
-
 			switch e.Filter {
 			case EVFILT_READ:
+				if (e.Flags & EV_EOF) != 0 {
+					// println("Client disconnected: ", e.Ident)
+					goto closeConnection
+				}
+
 				rBuf := &ctx.RequestBuffer
+				wBuf := &ctx.ResponseBuffer
+				parser := &ctx.Parser
+
 				if rBuf.RemainingSpace() == 0 {
-					if ctx.InProgressRequest != nil {
-						/* TODO(anton2920): handle this. */
-					}
-					continue
-				}
-				rBuf.ReadFrom(c)
-
-				e.Flags = 0
-				e.Filter = EVFILT_USER
-				e.Fflags = NOTE_TRIGGER | NOTE_FFCOPY | HTTP_EVENT_DECODE
-				e.Data = 0
-				if ret := Kevent(kq, unsafe.Slice(&e, 1), nil, nil); ret < 0 {
-					println("ERROR: failed to add trigger event: ", ret)
+					Shutdown(c, SHUT_RD)
+					WriteFull(c, unsafe.Slice(unsafe.StringData(HTTPResponseRequestEntityTooLarge), len(HTTPResponseRequestEntityTooLarge)))
+					goto closeConnection
 				}
 
-			case EVFILT_USER:
-				switch e.Fflags & 0xF {
-				default:
-					println(e.Fflags)
-					panic("invalid fflags for user event")
-				case HTTP_EVENT_DECODE:
-					rBuf := &ctx.RequestBuffer
-					for {
-						if ctx.InProgressRequest == nil {
-							ctx.InProgressRequest = (*HTTPRequest)(rPool.Get())
-						}
-						r := ctx.InProgressRequest
+				if n = int(Read(c, rBuf.RemainingSlice())); n < 0 {
+					println("ERROR: failed to read data from socket: ", n)
+					goto closeConnection
+				}
+				rBuf.Produce(n)
 
-					parserLoop:
-						for ctx.Parser.State != HTTP_STATE_DONE {
-							switch ctx.Parser.State {
-							default:
-								panic(ctx.Parser.State)
-							case HTTP_STATE_UNKNOWN:
-								unconsumed := rBuf.UnconsumedString()
-								if len(unconsumed) < 2 {
-									break parserLoop
-								}
-								if unconsumed[:2] == "\r\n" {
-									rBuf.Consume(len("\r\n"))
-									ctx.Parser.State = HTTP_STATE_DONE
-								} else {
-									ctx.Parser.State = HTTP_STATE_HEADER
-								}
-
-							case HTTP_STATE_METHOD:
-								unconsumed := rBuf.UnconsumedString()
-								if len(unconsumed) < 3 {
-									break parserLoop
-								}
-								switch unconsumed[:3] {
-								case "GET":
-									r.Method = "GET"
-								default:
-									/* TODO(anton2920): handle this. */
-								}
-								rBuf.Consume(len(r.Method) + 1)
-								ctx.Parser.State = HTTP_STATE_URI
-							case HTTP_STATE_URI:
-								unconsumed := rBuf.UnconsumedString()
-								lineEnd := FindChar(unconsumed, '\r')
-								if lineEnd == -1 {
-									break parserLoop
-								}
-
-								uriEnd := FindChar(unconsumed[:lineEnd], ' ')
-								if uriEnd == -1 {
-									/* TODO(anton2920): handle this. */
-								}
-
-								queryStart := FindChar(unconsumed[:lineEnd], '?')
-								if queryStart != -1 {
-									r.URL.Path = unconsumed[:queryStart]
-									r.URL.Query = unconsumed[queryStart+1 : uriEnd]
-								} else {
-									r.URL.Path = unconsumed[:uriEnd]
-									r.URL.Query = ""
-								}
-
-								const httpVersionPrefix = "HTTP/"
-								httpVersion := unconsumed[uriEnd+1 : lineEnd]
-								if httpVersion[:len(httpVersionPrefix)] != httpVersionPrefix {
-									/* TODO(anton2920): handle this. */
-								}
-								r.Version = httpVersion[len(httpVersionPrefix):]
-								rBuf.Consume(len(r.URL.Path) + len(r.URL.Query) + 1 + len(httpVersionPrefix) + len(r.Version) + len("\r\n"))
-								ctx.Parser.State = HTTP_STATE_UNKNOWN
-							case HTTP_STATE_HEADER:
-								unconsumed := rBuf.UnconsumedString()
-								lineEnd := FindChar(unconsumed, '\r')
-								if lineEnd == -1 {
-									break parserLoop
-								}
-								header := unconsumed[:lineEnd]
-								rBuf.Consume(len(header) + len("\r\n"))
-								ctx.Parser.State = HTTP_STATE_UNKNOWN
-							}
-						}
-
-						if ctx.Parser.State != HTTP_STATE_DONE {
-							if ctx.Parser.State == HTTP_STATE_METHOD {
-								rPool.Put(unsafe.Pointer(r))
-								ctx.InProgressRequest = nil
-							}
-							break
-						}
-						ctx.PendingRequests.Put(unsafe.Pointer(r))
-						ctx.InProgressRequest = nil
-						ctx.Parser.State = HTTP_STATE_METHOD
+				if n = HTTPHandleRequests(wBuf, rBuf, parser, router); n > 0 {
+					if n = int(Write(c, wBuf.UnconsumedSlice())); n < 0 {
+						println("ERROR: failed to write data to socket: ", n)
+						goto closeConnection
 					}
-
-					e.Flags = 0
-					e.Filter = EVFILT_USER
-					e.Fflags = NOTE_TRIGGER | NOTE_FFCOPY | HTTP_EVENT_EXECUTE
-					e.Data = 0
-					if ret := Kevent(kq, unsafe.Slice(&e, 1), nil, nil); ret < 0 {
-						println("ERROR: failed to add trigger event: ", ret)
-					}
-				case HTTP_EVENT_EXECUTE:
-					for {
-						r := (*HTTPRequest)(ctx.PendingRequests.Get())
-						if r == nil {
-							break
-						}
-						w := (*HTTPResponse)(wPool.Get())
-						w.Body = w.Body[:0]
-						w.ContentType = ""
-
-						router(w, r)
-
-						rPool.Put(unsafe.Pointer(r))
-						ctx.PendingResponses.Put(unsafe.Pointer(w))
-					}
-
-					e.Flags = 0
-					e.Filter = EVFILT_USER
-					e.Fflags = NOTE_TRIGGER | NOTE_FFCOPY | HTTP_EVENT_WRITEBACK
-					e.Data = 0
-					if ret := Kevent(kq, unsafe.Slice(&e, 1), nil, nil); ret < 0 {
-						println("ERROR: failed to add trigger event: ", ret)
-					}
-				case HTTP_EVENT_WRITEBACK:
-					wBuf := &ctx.ResponseBuffer
-
-					for {
-						w := (*HTTPResponse)(ctx.PendingResponses.Get())
-						if w == nil {
-							break
-						}
-
-						remaining := wBuf.RemainingSlice()
-						switch w.Code {
-						case HTTPStatusOK:
-							const statusLine = "HTTP/1.1 200 OK\r\n"
-							var headers string
-							switch w.ContentType {
-							case "", "text/html":
-								headers = "\r\nContent-Type: text/html\r\n\r\n"
-							case "image/jpg":
-								headers = "\r\nContent-Type: image/jpg\r\nCache-Control: max-age=604800\r\n\r\n"
-							case "application/rss+xml":
-								headers = "\r\nContent-Type: application/rss+xml\r\n\r\n"
-							case "image/png":
-								headers = "\r\nContent-Type: image/png\r\nCache-Control: max-age=604800\r\n\r\n"
-							default:
-								panic("unknown Content-Type '" + w.ContentType + "'")
-							}
-
-							nlength := SlicePutPositiveInt(contentLengthBuf[len(HTTPHeaderContentLengthPrefix):], len(w.Body))
-							contentLengthHeader := contentLengthBuf[:len(HTTPHeaderContentLengthPrefix)+nlength]
-
-							offset := len(statusLine) + len(contentLengthHeader) + len(headers)
-							if offset+len(w.Body) > wBuf.RemainingSpace() {
-								println("Sizes:", wBuf.RemainingSpace(), offset+len(w.Body))
-								println(wBuf.Head, wBuf.Tail)
-								panic("increase response buffer size")
-							}
-
-							copy(remaining, []byte(statusLine))
-							copy(remaining[len(statusLine):], contentLengthHeader)
-							copy(remaining[len(statusLine)+len(contentLengthHeader):], headers)
-							copy(remaining[offset:], w.Body)
-							wBuf.Produce(offset + len(w.Body))
-						case HTTPStatusBadRequest:
-							copy(remaining, unsafe.Slice(unsafe.StringData(HTTPResponseBadRequest), len(HTTPResponseBadRequest)))
-							wBuf.Produce(len(HTTPResponseBadRequest))
-						case HTTPStatusNotFound:
-							copy(remaining, unsafe.Slice(unsafe.StringData(HTTPResponseNotFound), len(HTTPResponseNotFound)))
-							wBuf.Produce(len(HTTPResponseNotFound))
-						}
-
-						wPool.Put(unsafe.Pointer(w))
-					}
-
-					e.Flags = EV_ENABLE
-					e.Filter = EVFILT_WRITE
-					e.Fflags = 0
-					if ret := Kevent(kq, unsafe.Slice(&e, 1), nil, nil); ret < 0 {
-						println("ERROR: failed to add trigger event: ", ret)
-					}
+					wBuf.Consume(n)
 				}
 			case EVFILT_WRITE:
-				ctx.ResponseBuffer.WriteTo(c)
+				wBuf := &ctx.ResponseBuffer
+				if wBuf.UnconsumedLen() > 0 {
+					if n = int(Write(c, wBuf.UnconsumedSlice())); n < 0 {
+						println("ERROR: failed to write data to socket: ", n)
+						goto closeConnection
+					}
+					wBuf.Consume(n)
+				}
 			}
+			continue
+
+		closeConnection:
+			ctx.Check = 1 - ctx.Check
+			ctxPool.Put(unsafe.Pointer(ctx))
+			Shutdown(c, SHUT_WR)
+			Close(c)
+			continue
 		}
 	}
 }
