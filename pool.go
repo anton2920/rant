@@ -1,36 +1,38 @@
 package main
 
-type SyncPool[T any] struct {
-	M     Mutex
-	Items []*T
+import "unsafe"
 
-	New func() *T
+type SyncPool struct {
+	M     Mutex
+	Items []unsafe.Pointer
+
+	New func() unsafe.Pointer
 }
 
-func NewSyncPool[T any](size int, newF func() *T) *SyncPool[T] {
-	ret := new(SyncPool[T])
-	ret.Items = make([]*T, 0, size)
+func NewSyncPool(size int, newF func() unsafe.Pointer) *SyncPool {
+	ret := new(SyncPool)
+	ret.Items = make([]unsafe.Pointer, 0, size)
 	ret.New = newF
 	return ret
 }
 
-func SyncPoolGet[T any](p *SyncPool[T]) *T {
-	var item *T
+func (sp *SyncPool) Get() unsafe.Pointer {
+	var item unsafe.Pointer
 
-	p.M.Lock()
-	if len(p.Items) > 0 {
-		item = p.Items[len(p.Items)-1]
-		p.Items = p.Items[:len(p.Items)-1]
-		p.M.Unlock()
+	sp.M.Lock()
+	if len(sp.Items) > 0 {
+		item = sp.Items[len(sp.Items)-1]
+		sp.Items = sp.Items[:len(sp.Items)-1]
+		sp.M.Unlock()
 	} else {
-		p.M.Unlock()
-		item = p.New()
+		sp.M.Unlock()
+		item = sp.New()
 	}
 	return item
 }
 
-func SyncPoolPut[T any](p *SyncPool[T], item *T) {
-	p.M.Lock()
-	p.Items = append(p.Items, item)
-	p.M.Unlock()
+func (sp *SyncPool) Put(item unsafe.Pointer) {
+	sp.M.Lock()
+	sp.Items = append(sp.Items, item)
+	sp.M.Unlock()
 }

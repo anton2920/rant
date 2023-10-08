@@ -1,29 +1,31 @@
 package main
 
-type SyncQueue[T any] struct {
+import "unsafe"
+
+type SyncQueue struct {
 	M     Mutex
-	Items []*T
+	Items []unsafe.Pointer
 	Pos   int
 }
 
-func SyncQueueGet[T any](q *SyncQueue[T]) *T {
-	var ret *T
+func (sq *SyncQueue) Get() unsafe.Pointer {
+	var ret unsafe.Pointer
 
-	q.M.Lock()
-	if len(q.Items) > q.Pos {
-		ret = q.Items[q.Pos]
-		q.Pos++
+	sq.M.Lock()
+	if len(sq.Items) > sq.Pos {
+		ret = sq.Items[sq.Pos]
+		sq.Pos++
 	} else {
-		q.Pos = 0
-		q.Items = q.Items[:0]
+		sq.Pos = 0
+		sq.Items = sq.Items[:0]
 	}
-	q.M.Unlock()
+	sq.M.Unlock()
 
 	return ret
 }
 
-func SyncQueuePut[T any](q *SyncQueue[T], item *T) {
-	q.M.Lock()
-	q.Items = append(q.Items, item)
-	q.M.Unlock()
+func (sq *SyncQueue) Put(item unsafe.Pointer) {
+	sq.M.Lock()
+	sq.Items = append(sq.Items, item)
+	sq.M.Unlock()
 }

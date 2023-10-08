@@ -25,8 +25,8 @@ type HTTPContext struct {
 	RequestBuffer  CircularBuffer
 	ResponseBuffer CircularBuffer
 
-	PendingRequests  SyncQueue[HTTPRequest]
-	PendingResponses SyncQueue[HTTPResponse]
+	PendingRequests  SyncQueue
+	PendingResponses SyncQueue
 
 	InProgressRequest *HTTPRequest
 	Parser            HTTPRequestParser
@@ -77,7 +77,7 @@ const (
 	HTTP_EVENT_WRITEBACK
 )
 
-func NewHTTPContext() *HTTPContext {
+func NewHTTPContext() unsafe.Pointer {
 	var err error
 
 	c := new(HTTPContext)
@@ -90,17 +90,17 @@ func NewHTTPContext() *HTTPContext {
 		return nil
 	}
 
-	return c
+	return unsafe.Pointer(c)
 }
 
-func NewHTTPRequest() *HTTPRequest {
-	return new(HTTPRequest)
+func NewHTTPRequest() unsafe.Pointer {
+	return unsafe.Pointer(new(HTTPRequest))
 }
 
-func NewHTTPResponse() *HTTPResponse {
+func NewHTTPResponse() unsafe.Pointer {
 	w := new(HTTPResponse)
 	w.Body = make([]byte, 16*1024)
-	return w
+	return unsafe.Pointer(w)
 }
 
 func GetContextAndCheck(ptr unsafe.Pointer) (*HTTPContext, uintptr) {
@@ -112,7 +112,7 @@ func GetContextAndCheck(ptr unsafe.Pointer) (*HTTPContext, uintptr) {
 	return ctx, check
 }
 
-func HTTPWorker(kq int32, l int32, ctxPool *SyncPool[HTTPContext], rPool *SyncPool[HTTPRequest], wPool *SyncPool[HTTPResponse], router HTTPRouter) {
+func HTTPWorker(l int32, router HTTPRouter) {
 	var contentLengthBuf []byte
 	contentLengthBuf = make([]byte, len(HTTPHeaderContentLengthPrefix)+10)
 	copy(contentLengthBuf, []byte(HTTPHeaderContentLengthPrefix))
@@ -120,8 +120,21 @@ func HTTPWorker(kq int32, l int32, ctxPool *SyncPool[HTTPContext], rPool *SyncPo
 	var pinner runtime.Pinner
 	var events [256]Kevent_t
 	var nevents, i int32
+	var kq, ret int32
 
 	runtime.LockOSThread()
+
+	if kq = Kqueue(); kq < 0 {
+		Fatal("Failed to open kernel queue: ", int(kq))
+	}
+	event := Kevent_t{Ident: uintptr(l), Filter: EVFILT_READ, Flags: EV_ADD | EV_CLEAR}
+	if ret = Kevent(kq, unsafe.Slice(&event, 1), nil, nil); ret < 0 {
+		Fatal("Failed to add event for listener socket: ", int(ret))
+	}
+
+	ctxPool := NewSyncPool(16*1024, NewHTTPContext)
+	rPool := NewSyncPool(16*1024, NewHTTPRequest)
+	wPool := NewSyncPool(16*1024, NewHTTPResponse)
 
 	/* NOTE(anton2920): this is indended to be optimized for high throughput.
 	 * Pipeline consists of following steps:
@@ -151,7 +164,7 @@ func HTTPWorker(kq int32, l int32, ctxPool *SyncPool[HTTPContext], rPool *SyncPo
 					continue
 				}
 
-				ctx := SyncPoolGet(ctxPool)
+				ctx := (*HTTPContext)(ctxPool.Get())
 				if ctx == nil {
 					Fatal("Failed to acquire new HTTP context", 0)
 				}
@@ -165,7 +178,7 @@ func HTTPWorker(kq int32, l int32, ctxPool *SyncPool[HTTPContext], rPool *SyncPo
 				}
 				if ret := Kevent(kq, unsafe.Slice(&events[0], len(events)), nil, nil); ret < 0 {
 					println("ERROR: failed to add new events to kqueue", ret)
-					SyncPoolPut(ctxPool, ctx)
+					ctxPool.Put(unsafe.Pointer(ctx))
 					continue
 				}
 				continue
@@ -180,7 +193,7 @@ func HTTPWorker(kq int32, l int32, ctxPool *SyncPool[HTTPContext], rPool *SyncPo
 			if (e.Flags & EV_EOF) != 0 {
 				// println("Client disconnected: ", e.Ident)
 				ctx.Check = 1 - check
-				SyncPoolPut(ctxPool, ctx)
+				ctxPool.Put(unsafe.Pointer(ctx))
 				Close(c)
 				continue
 			}
@@ -190,9 +203,9 @@ func HTTPWorker(kq int32, l int32, ctxPool *SyncPool[HTTPContext], rPool *SyncPo
 				rBuf := &ctx.RequestBuffer
 				if rBuf.RemainingSpace() == 0 {
 					if ctx.InProgressRequest != nil {
-						w := SyncPoolGet(wPool)
+						w := (*HTTPResponse)(wPool.Get())
 						w.Code = HTTPStatusRequestTimeout
-						SyncQueuePut(&ctx.PendingResponses, w)
+						ctx.PendingResponses.Put(unsafe.Pointer(w))
 					}
 					e.Flags |= EV_DISABLE
 					Kevent(kq, unsafe.Slice(&e, 1), nil, nil)
@@ -217,7 +230,7 @@ func HTTPWorker(kq int32, l int32, ctxPool *SyncPool[HTTPContext], rPool *SyncPo
 					rBuf := &ctx.RequestBuffer
 					for {
 						if ctx.InProgressRequest == nil {
-							ctx.InProgressRequest = SyncPoolGet(rPool)
+							ctx.InProgressRequest = (*HTTPRequest)(rPool.Get())
 						}
 						r := ctx.InProgressRequest
 
@@ -247,9 +260,9 @@ func HTTPWorker(kq int32, l int32, ctxPool *SyncPool[HTTPContext], rPool *SyncPo
 								case "GET":
 									r.Method = "GET"
 								default:
-									w := SyncPoolGet(wPool)
+									w := (*HTTPResponse)(wPool.Get())
 									w.Code = HTTPStatusMethodNotAllowed
-									SyncQueuePut(&ctx.PendingResponses, w)
+									ctx.PendingResponses.Put(unsafe.Pointer(w))
 								}
 								rBuf.Consume(len(r.Method) + 1)
 								ctx.Parser.State = HTTP_STATE_URI
@@ -262,9 +275,9 @@ func HTTPWorker(kq int32, l int32, ctxPool *SyncPool[HTTPContext], rPool *SyncPo
 
 								uriEnd := FindChar(unconsumed[:lineEnd], ' ')
 								if uriEnd == -1 {
-									w := SyncPoolGet(wPool)
+									w := (*HTTPResponse)(wPool.Get())
 									w.Code = HTTPStatusBadRequest
-									SyncQueuePut(&ctx.PendingResponses, w)
+									ctx.PendingResponses.Put(unsafe.Pointer(w))
 								}
 
 								queryStart := FindChar(unconsumed[:lineEnd], '?')
@@ -279,9 +292,9 @@ func HTTPWorker(kq int32, l int32, ctxPool *SyncPool[HTTPContext], rPool *SyncPo
 								const httpVersionPrefix = "HTTP/"
 								httpVersion := unconsumed[uriEnd+1 : lineEnd]
 								if httpVersion[:len(httpVersionPrefix)] != httpVersionPrefix {
-									w := SyncPoolGet(wPool)
+									w := (*HTTPResponse)(wPool.Get())
 									w.Code = HTTPStatusBadRequest
-									SyncQueuePut(&ctx.PendingResponses, w)
+									ctx.PendingResponses.Put(unsafe.Pointer(w))
 								}
 								r.Version = httpVersion[len(httpVersionPrefix):]
 								rBuf.Consume(len(r.URL.Path) + len(r.URL.Query) + 1 + len(httpVersionPrefix) + len(r.Version) + len("\r\n"))
@@ -300,12 +313,12 @@ func HTTPWorker(kq int32, l int32, ctxPool *SyncPool[HTTPContext], rPool *SyncPo
 
 						if ctx.Parser.State != HTTP_STATE_DONE {
 							if ctx.Parser.State == HTTP_STATE_METHOD {
-								SyncPoolPut(rPool, r)
+								rPool.Put(unsafe.Pointer(r))
 								ctx.InProgressRequest = nil
 							}
 							break
 						}
-						SyncQueuePut(&ctx.PendingRequests, r)
+						ctx.PendingRequests.Put(unsafe.Pointer(r))
 						ctx.InProgressRequest = nil
 						ctx.Parser.State = HTTP_STATE_METHOD
 					}
@@ -319,18 +332,18 @@ func HTTPWorker(kq int32, l int32, ctxPool *SyncPool[HTTPContext], rPool *SyncPo
 					}
 				case HTTP_EVENT_EXECUTE:
 					for {
-						r := SyncQueueGet(&ctx.PendingRequests)
+						r := (*HTTPRequest)(ctx.PendingRequests.Get())
 						if r == nil {
 							break
 						}
-						w := SyncPoolGet(wPool)
+						w := (*HTTPResponse)(wPool.Get())
 						w.Body = w.Body[:0]
 						w.ContentType = ""
 
 						router(w, r)
 
-						SyncPoolPut(rPool, r)
-						SyncQueuePut(&ctx.PendingResponses, w)
+						rPool.Put(unsafe.Pointer(r))
+						ctx.PendingResponses.Put(unsafe.Pointer(w))
 					}
 
 					e.Flags = 0
@@ -344,7 +357,7 @@ func HTTPWorker(kq int32, l int32, ctxPool *SyncPool[HTTPContext], rPool *SyncPo
 					wBuf := &ctx.ResponseBuffer
 
 					for {
-						w := SyncQueueGet(&ctx.PendingResponses)
+						w := (*HTTPResponse)(ctx.PendingResponses.Get())
 						if w == nil {
 							break
 						}
@@ -390,7 +403,7 @@ func HTTPWorker(kq int32, l int32, ctxPool *SyncPool[HTTPContext], rPool *SyncPo
 							wBuf.Produce(len(HTTPResponseNotFound))
 						}
 
-						SyncPoolPut(wPool, w)
+						wPool.Put(unsafe.Pointer(w))
 					}
 
 					e.Flags = EV_ENABLE
@@ -408,7 +421,7 @@ func HTTPWorker(kq int32, l int32, ctxPool *SyncPool[HTTPContext], rPool *SyncPo
 }
 
 func ListenAndServe(port uint16, router HTTPRouter) error {
-	var ret, l, kq int32
+	var ret, l int32
 
 	if l = Socket(PF_INET, SOCK_STREAM, 0); l < 0 {
 		return NewError("Failed to create socket: ", int(l))
@@ -429,23 +442,11 @@ func ListenAndServe(port uint16, router HTTPRouter) error {
 		return NewError("Failed to listen on the socket: ", int(ret))
 	}
 
-	if kq = Kqueue(); kq < 0 {
-		return NewError("Failed to open kernel queue: ", int(kq))
-	}
-	event := Kevent_t{Ident: uintptr(l), Filter: EVFILT_READ, Flags: EV_ADD | EV_CLEAR}
-	if ret = Kevent(kq, unsafe.Slice(&event, 1), nil, nil); ret < 0 {
-		return NewError("Failed to add event for listener socket: ", int(ret))
-	}
-
-	ctxPool := NewSyncPool[HTTPContext](16*1024, NewHTTPContext)
-	rPool := NewSyncPool[HTTPRequest](16*1024, NewHTTPRequest)
-	wPool := NewSyncPool[HTTPResponse](16*1024, NewHTTPResponse)
-
 	const nworkers = 4
 	for i := 0; i < nworkers-1; i++ {
-		go HTTPWorker(kq, l, ctxPool, rPool, wPool, router)
+		go HTTPWorker(l, router)
 	}
-	HTTPWorker(kq, l, ctxPool, rPool, wPool, router)
+	HTTPWorker(l, router)
 
 	return nil
 }
