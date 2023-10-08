@@ -192,7 +192,7 @@ func HTTPWorker(l int32, router HTTPRouter) {
 
 			if (e.Flags & EV_EOF) != 0 {
 				// println("Client disconnected: ", e.Ident)
-				ctx.Check = 1 - check
+				ctx.Check = 1 - ctx.Check
 				ctxPool.Put(unsafe.Pointer(ctx))
 				Close(c)
 				continue
@@ -203,12 +203,8 @@ func HTTPWorker(l int32, router HTTPRouter) {
 				rBuf := &ctx.RequestBuffer
 				if rBuf.RemainingSpace() == 0 {
 					if ctx.InProgressRequest != nil {
-						w := (*HTTPResponse)(wPool.Get())
-						w.Code = HTTPStatusRequestTimeout
-						ctx.PendingResponses.Put(unsafe.Pointer(w))
+						/* TODO(anton2920): handle this. */
 					}
-					e.Flags |= EV_DISABLE
-					Kevent(kq, unsafe.Slice(&e, 1), nil, nil)
 					continue
 				}
 				rBuf.ReadFrom(c)
@@ -260,9 +256,7 @@ func HTTPWorker(l int32, router HTTPRouter) {
 								case "GET":
 									r.Method = "GET"
 								default:
-									w := (*HTTPResponse)(wPool.Get())
-									w.Code = HTTPStatusMethodNotAllowed
-									ctx.PendingResponses.Put(unsafe.Pointer(w))
+									/* TODO(anton2920): handle this. */
 								}
 								rBuf.Consume(len(r.Method) + 1)
 								ctx.Parser.State = HTTP_STATE_URI
@@ -275,9 +269,7 @@ func HTTPWorker(l int32, router HTTPRouter) {
 
 								uriEnd := FindChar(unconsumed[:lineEnd], ' ')
 								if uriEnd == -1 {
-									w := (*HTTPResponse)(wPool.Get())
-									w.Code = HTTPStatusBadRequest
-									ctx.PendingResponses.Put(unsafe.Pointer(w))
+									/* TODO(anton2920): handle this. */
 								}
 
 								queryStart := FindChar(unconsumed[:lineEnd], '?')
@@ -292,9 +284,7 @@ func HTTPWorker(l int32, router HTTPRouter) {
 								const httpVersionPrefix = "HTTP/"
 								httpVersion := unconsumed[uriEnd+1 : lineEnd]
 								if httpVersion[:len(httpVersionPrefix)] != httpVersionPrefix {
-									w := (*HTTPResponse)(wPool.Get())
-									w.Code = HTTPStatusBadRequest
-									ctx.PendingResponses.Put(unsafe.Pointer(w))
+									/* TODO(anton2920): handle this. */
 								}
 								r.Version = httpVersion[len(httpVersionPrefix):]
 								rBuf.Consume(len(r.URL.Path) + len(r.URL.Query) + 1 + len(httpVersionPrefix) + len(r.Version) + len("\r\n"))
