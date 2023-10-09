@@ -287,9 +287,6 @@ func HTTPWorker(l int32, router HTTPRouter) {
 
 	ctxPool := NewPool(NewHTTPContext)
 
-	/* NOTE(anton2920): this is indended to be optimized for high throughput.
-	 * Pipeline consists of following steps:
-	 */
 	for {
 		if nevents = Kevent(kq, nil, unsafe.Slice(&events[0], len(events)), nil); nevents < 0 {
 			if -nevents == EINTR {
