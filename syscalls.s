@@ -5,7 +5,7 @@
 #include "sys/syscall.h"
 
 /* func RawAccept(s int32, addr *SockAddr, addrlen *uint32) int32 */
-TEXT main·RawAccept(SB), NOSPLIT, $0-20
+TEXT ·RawAccept(SB), NOSPLIT, $0-20
 	MOVQ $SYS_accept, AX
 	MOVL s+0(FP), DI
 	MOVQ addr+8(FP), SI
@@ -17,7 +17,7 @@ TEXT main·RawAccept(SB), NOSPLIT, $0-20
 	RET
 
 /* func Bind(s int32, addr *SockAddr, addrlen uint32) int32 */
-TEXT main·Bind(SB), NOSPLIT, $0-16
+TEXT ·Bind(SB), NOSPLIT, $0-16
 	MOVQ $SYS_bind, AX
 	MOVL s+0(FP), DI
 	MOVQ addr+8(FP), SI
@@ -29,7 +29,7 @@ TEXT main·Bind(SB), NOSPLIT, $0-16
 	RET
 
 /* func ClockGettime(clockID int32, tp *Timespec) int32 */
-TEXT main·ClockGettime(SB), NOSPLIT, $0-12
+TEXT ·ClockGettime(SB), NOSPLIT, $0-12
 	MOVQ $SYS_clock_gettime, AX
 	MOVL id+0(FP), DI
 	MOVQ tp+8(FP), SI
@@ -39,7 +39,7 @@ TEXT main·ClockGettime(SB), NOSPLIT, $0-12
 	RET
 
 /* func RawClose(fd int32) int32 */
-TEXT main·RawClose(SB), NOSPLIT, $0-4
+TEXT ·RawClose(SB), NOSPLIT, $0-4
 	MOVQ $SYS_close, AX
 	MOVL fd+0(FP), DI
 	SYSCALL
@@ -49,7 +49,7 @@ TEXT main·RawClose(SB), NOSPLIT, $0-4
 	RET
 
 /* func Exit(status int32) */
-TEXT main·Exit(SB), NOSPLIT, $0-4
+TEXT ·Exit(SB), NOSPLIT, $0-4
 	MOVQ $SYS_exit, AX
 	MOVL status+0(FP), DI
 	SYSCALL
@@ -57,7 +57,7 @@ TEXT main·Exit(SB), NOSPLIT, $0-4
 	MOVQ 0x0, AX
 
 /* func Fstat(fd int32, sb *Stat) int32 */
-TEXT main·Fstat(SB), NOSPLIT, $0-12
+TEXT ·Fstat(SB), NOSPLIT, $0-12
 	MOVQ $SYS_fstat, AX
 	MOVL fd+0(FP), DI
 	MOVQ sb+8(FP), SI
@@ -68,7 +68,7 @@ TEXT main·Fstat(SB), NOSPLIT, $0-12
 	RET
 
 /* func Ftruncate(fd int32, length int64) int32 */
-TEXT main·Ftruncate(SB), NOSPLIT, $0-12
+TEXT ·Ftruncate(SB), NOSPLIT, $0-12
 	MOVQ $SYS_ftruncate, AX
 	MOVL fd+0(FP), DI
 	MOVQ len+8(FP), SI
@@ -79,7 +79,7 @@ TEXT main·Ftruncate(SB), NOSPLIT, $0-12
 	RET
 
 /* func RawKevent(kq int32, changelist []Kevent, eventlist []Kevent, timeout *Timespec) int32 */
-TEXT main·RawKevent(SB), NOSPLIT, $0-60
+TEXT ·RawKevent(SB), NOSPLIT, $0-60
 	MOVQ $SYS_kevent, AX
 	MOVL kq+0(FP), DI
 	MOVQ chlist+8(FP), SI
@@ -94,7 +94,7 @@ TEXT main·RawKevent(SB), NOSPLIT, $0-60
 	RET
 
 /* func Kqueue() int32 */
-TEXT main·Kqueue(SB), NOSPLIT, $0-0
+TEXT ·Kqueue(SB), NOSPLIT, $0-0
 	MOVQ $SYS_kqueue, AX
 	SYSCALL
 	JCC 2(PC)
@@ -103,7 +103,7 @@ TEXT main·Kqueue(SB), NOSPLIT, $0-0
 	RET
 
 /* func Listen(s int32, backlog int32) int32 */
-TEXT main·Listen(SB), NOSPLIT, $0-8
+TEXT ·Listen(SB), NOSPLIT, $0-8
 	MOVQ $SYS_listen, AX
 	MOVL s+0(FP), DI
 	MOVL backlog+4(FP), SI
@@ -114,7 +114,7 @@ TEXT main·Listen(SB), NOSPLIT, $0-8
 	RET
 
 /* func Lseek(fd int32, offset int64, whence int32) int64 */
-TEXT main·Lseek(SB), NOSPLIT, $0-16
+TEXT ·Lseek(SB), NOSPLIT, $0-16
 	MOVQ $SYS_lseek, AX
 	MOVL fd+0(FP), DI
 	MOVQ offset+8(FP), SI
@@ -126,7 +126,7 @@ TEXT main·Lseek(SB), NOSPLIT, $0-16
 	RET
 
 /* func Mmap(addr unsafe.Pointer, len uint64, prot, flags, fd int32, offset int64) unsafe.Pointer */
-TEXT main·Mmap(SB), NOSPLIT, $0-36
+TEXT ·Mmap(SB), NOSPLIT, $0-36
 	MOVQ $SYS_mmap, AX
 	MOVQ addr+0(FP), DI
 	MOVQ len+8(FP), SI
@@ -141,7 +141,7 @@ TEXT main·Mmap(SB), NOSPLIT, $0-36
 	RET
 
 /* func RawNanosleep(rqtp, rmtp *Timespec) int32 */
-TEXT main·RawNanosleep(SB), NOSPLIT, $0-16
+TEXT ·RawNanosleep(SB), NOSPLIT, $0-16
 	MOVQ $SYS_nanosleep, AX
 	MOVQ rqtp+0(FP), DI
 	MOVQ rmtp+8(FP), SI
@@ -152,7 +152,7 @@ TEXT main·RawNanosleep(SB), NOSPLIT, $0-16
 	RET
 
 /* func RawOpen(path string, flags int32, mode uint16) int32 */
-TEXT main·RawOpen(SB), NOSPLIT, $0-22
+TEXT ·RawOpen(SB), NOSPLIT, $0-22
 	MOVQ $SYS_open, AX
 	MOVQ path+0(FP), DI
 	MOVL flags+16(FP), SI
@@ -164,7 +164,7 @@ TEXT main·RawOpen(SB), NOSPLIT, $0-22
 	RET
 
 /* func RawRead(fd int32, buf []byte) int64 */
-TEXT main·RawRead(SB), NOSPLIT, $0-28
+TEXT ·RawRead(SB), NOSPLIT, $0-28
 	MOVQ $SYS_read, AX
 	MOVL fd+0(FP), DI
 	MOVQ buf+8(FP), SI
@@ -176,7 +176,7 @@ TEXT main·RawRead(SB), NOSPLIT, $0-28
 	RET
 
 /* func Setsockopt(s, level, optname int32, optval unsafe.Pointer, optlen uint32) int32 */
-TEXT main·Setsockopt(SB), NOSPLIT, $0-24
+TEXT ·Setsockopt(SB), NOSPLIT, $0-24
 	MOVQ $SYS_setsockopt, AX
 	MOVL s+0(FP), DI
 	MOVL lvl+4(FP), SI
@@ -190,7 +190,7 @@ TEXT main·Setsockopt(SB), NOSPLIT, $0-24
 	RET
 
 /* func ShmOpen2(path string, flags int32, mode uint16, shmflags int32, name unsafe.Pointer) int32 */
-TEXT main·ShmOpen2(SB), NOSPLIT, $0-42
+TEXT ·ShmOpen2(SB), NOSPLIT, $0-42
 	MOVQ $SYS_shm_open2, AX
 	MOVQ path+0(FP), DI
 	MOVL flags+16(FP), SI
@@ -204,7 +204,7 @@ TEXT main·ShmOpen2(SB), NOSPLIT, $0-42
 	RET
 
 /* func Shutdown(s int32, how int32) int32 */
-TEXT main·Shutdown(SB), NOSPLIT, $0-8
+TEXT ·Shutdown(SB), NOSPLIT, $0-8
 	MOVQ $SYS_shutdown, AX
 	MOVL s+0(FP), DI
 	MOVL how+4(FP), SI
@@ -214,10 +214,10 @@ TEXT main·Shutdown(SB), NOSPLIT, $0-8
 	MOVL AX, ret+8(FP)
 	RET
 
-/* func Socket(domain, typ, protocol int32) int32 */
-TEXT main·Socket(SB), NOSPLIT, $0-12
+/* func Socket(do, typ, protocol int32) int32 */
+TEXT ·Socket(SB), NOSPLIT, $0-12
 	MOVQ $SYS_socket, AX
-	MOVL domain+0(FP), DI
+	MOVL do+0(FP), DI
 	MOVL type+4(FP), SI
 	MOVL proto+8(FP), DX
 	SYSCALL
@@ -227,7 +227,7 @@ TEXT main·Socket(SB), NOSPLIT, $0-12
 	RET
 
 /* func RawWrite(fd int32, buf []byte) int64 */
-TEXT main·RawWrite(SB), NOSPLIT, $0-28
+TEXT ·RawWrite(SB), NOSPLIT, $0-28
 	MOVQ $SYS_write, AX
 	MOVL fd+0(FP), DI
 	MOVQ buf+8(FP), SI

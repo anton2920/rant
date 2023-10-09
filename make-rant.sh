@@ -87,7 +87,7 @@ case $1 in
 		;;
 	release)
 		run go tool asm -p main -I $BUILDDIR -I $GOROOT/pkg/include -I /usr/include -D GOOS_$GOOS -D GOARCH_$GOARCH $5 -D GOAMD64_$GOAMD64  -I $GOROOT/src/runtime -gensymabis -o $BUILDDIR/symabis $ASMSRC
-		run go tool compile -o $BUILDDIR/main.a -trimpath "$BUILDDIR=>" -p main -symabis $BUILDDIR/symabis -c=$GOMAXPROCS -nolocalimports -importcfg $BUILDDIR/importcfg -pack -asmhdr $BUILDDIR/go_asm.h $GOSRC
+		run go tool compile -o $BUILDDIR/main.a -trimpath "$BUILDDIR=>" -p main -pgoprofile default.pgo -symabis $BUILDDIR/symabis -c=$GOMAXPROCS -nolocalimports -importcfg $BUILDDIR/importcfg -pack -asmhdr $BUILDDIR/go_asm.h $GOSRC
 		for file in $ASMSRC; do
 			run go tool asm -p main -I $BUILDDIR -I $GOROOT/pkg/include -I /usr/include/ -D GOOS_$GOOS -D GOARCH_$GOARCH -D GOAMD64_$GOAMD64 -I $GOROOT/src/runtime -o $BUILDDIR/`basename $file`.o $file
 		done
