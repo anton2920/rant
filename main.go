@@ -77,7 +77,7 @@ func TweetPageHandler(w *HTTPResponse, r *HTTPRequest) {
 }
 
 func PhotoHandler(w *HTTPResponse, r *HTTPRequest) {
-	w.WriteCompleteResponse(HTTPStatusOK, "image/jpg", *Photo)
+	w.WriteCompleteResponse(HTTPStatusOK, "image/jpg\r\nCache-Control: max-age=604800", *Photo)
 }
 
 func RSSPageHandler(w *HTTPResponse, r *HTTPRequest) {
@@ -85,7 +85,7 @@ func RSSPageHandler(w *HTTPResponse, r *HTTPRequest) {
 }
 
 func RSSPhotoHandler(w *HTTPResponse, r *HTTPRequest) {
-	w.WriteCompleteResponse(HTTPStatusOK, "image/png", *RSSPhoto)
+	w.WriteCompleteResponse(HTTPStatusOK, "image/png\r\nCache-Control: max-age=604800", *RSSPhoto)
 }
 
 func Router(w *HTTPResponse, r *HTTPRequest) {
