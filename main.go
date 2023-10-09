@@ -2,8 +2,10 @@ package main
 
 import "unsafe"
 
-/* NOTE(anton2920): assuming 4 KiB page size. */
-const PageSize = 4096
+const (
+	PageSize     = 4 * 1024
+	HugePageSize = 2 * 1024 * 1024
+)
 
 var (
 	IndexPage    *[]byte
@@ -24,13 +26,13 @@ func IndexPageHandler(w *HTTPResponse, r *HTTPRequest) {
 
 	if r.URL.Query != "" {
 		if r.URL.Query[:len("Query=")] != "Query=" {
-			w.Code = HTTPStatusBadRequest
+			w.WriteBuiltinResponse(HTTPStatusBadRequest)
 			return
 		}
 
 		queryString = r.URL.Query[len("Query="):]
 		if len(queryString) > maxQueryLen {
-			w.Code = HTTPStatusBadRequest
+			w.WriteBuiltinResponse(HTTPStatusBadRequest)
 			return
 		}
 	}
@@ -39,71 +41,68 @@ func IndexPageHandler(w *HTTPResponse, r *HTTPRequest) {
 		var decodedQuery [maxQueryLen]byte
 		decodedLen, ok := URLDecode(unsafe.Slice(&decodedQuery[0], len(decodedQuery)), queryString)
 		if !ok {
-			w.Code = HTTPStatusBadRequest
+			w.WriteBuiltinResponse(HTTPStatusBadRequest)
 			return
 		}
 
-		w.Code = HTTPStatusOK
-		w.Body = append(w.Body, *IndexPage...)
+		w.StartResponse(HTTPStatusOK, "text/html")
+		w.WriteResponseBody(*IndexPage)
 		for i := len(TweetHTMLs) - 1; i >= 0; i-- {
 			if FindSubstring(unsafe.String(unsafe.SliceData(TweetTexts[i]), len(TweetTexts[i])), unsafe.String(&decodedQuery[0], decodedLen)) != -1 {
-				w.Body = append(w.Body, TweetHTMLs[i]...)
+				w.WriteResponseBody(TweetHTMLs[i])
 			}
 		}
-		w.Body = append(w.Body, *FinisherPage...)
+		w.WriteResponseBody(*FinisherPage)
+		w.FinishResponse()
 	} else {
-		w.Code = HTTPStatusOK
-		w.Body = append(w.Body, IndexPageFull...)
+		w.WriteCompleteResponse(HTTPStatusOK, "text/html", IndexPageFull)
 	}
+}
+
+func PlaintextHandler(w *HTTPResponse, r *HTTPRequest) {
+	w.WriteCompleteResponse(HTTPStatusOK, "text/plain", []byte("Hello, world!\n"))
 }
 
 func TweetPageHandler(w *HTTPResponse, r *HTTPRequest) {
 	id, ok := StrToPositiveInt(r.URL.Path[len("/tweet/"):])
 	if (!ok) || (id < 0) || (id > len(TweetHTMLs)-1) {
-		w.Code = HTTPStatusNotFound
+		w.WriteBuiltinResponse(HTTPStatusNotFound)
 		return
 	}
 
-	w.Code = HTTPStatusOK
-	w.Body = append(w.Body, *TweetPage...)
-	w.Body = append(w.Body, TweetHTMLs[id]...)
-	w.Body = append(w.Body, *FinisherPage...)
+	w.StartResponseWithSize(HTTPStatusOK, "text/html", len(*TweetPage)+len(TweetHTMLs[id])+len(*FinisherPage))
+	w.WriteResponseBody(*TweetPage)
+	w.WriteResponseBody(TweetHTMLs[id])
+	w.WriteResponseBody(*FinisherPage)
 }
 
 func PhotoHandler(w *HTTPResponse, r *HTTPRequest) {
-	w.Code = HTTPStatusOK
-	w.ContentType = "image/jpg"
-	w.Body = append(w.Body, *Photo...)
+	w.WriteCompleteResponse(HTTPStatusOK, "image/jpg", *Photo)
 }
 
 func RSSPageHandler(w *HTTPResponse, r *HTTPRequest) {
-	w.Code = HTTPStatusOK
-	w.ContentType = "application/rss+xml"
-	w.Body = append(w.Body, RSSPageFull...)
+	w.WriteCompleteResponse(HTTPStatusOK, "application/rss+xml", RSSPageFull)
 }
 
 func RSSPhotoHandler(w *HTTPResponse, r *HTTPRequest) {
-	w.Code = HTTPStatusOK
-	w.ContentType = "image/png"
-	w.Body = append(w.Body, *RSSPhoto...)
+	w.WriteCompleteResponse(HTTPStatusOK, "image/png", *RSSPhoto)
 }
 
 func Router(w *HTTPResponse, r *HTTPRequest) {
 	if r.URL.Path == "/" {
 		IndexPageHandler(w, r)
-	} else if (len(r.URL.Path) == len("/photo.jpg")) && (r.URL.Path == "/photo.jpg") {
+	} else if r.URL.Path == "/plaintext" {
+		PlaintextHandler(w, r)
+	} else if r.URL.Path == "/photo.jpg" {
 		PhotoHandler(w, r)
-	} else if (len(r.URL.Path) == len("/favicon.ico")) && (r.URL.Path == "/favicon.ico") {
-		/* Do nothing :) */
-		w.Code = HTTPStatusNotFound
 	} else if (len(r.URL.Path) > len("/tweet/")) && (r.URL.Path[:len("/tweet/")] == "/tweet/") {
 		TweetPageHandler(w, r)
-	} else if (len(r.URL.Path) == len("/rss")) && (r.URL.Path == "/rss") {
+	} else if r.URL.Path == "/rss" {
 		RSSPageHandler(w, r)
-	} else if (len(r.URL.Path) == len("/rss.png")) && (r.URL.Path == "/rss.png") {
+	} else if r.URL.Path == "/rss.png" {
 		RSSPhotoHandler(w, r)
 	} else {
-		w.Code = HTTPStatusNotFound
+		w.WriteBuiltinResponse(HTTPStatusNotFound)
 	}
 }
 

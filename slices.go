@@ -27,7 +27,7 @@ func SlicePutPositiveInt(buf []byte, x int) int {
 func SlicePutTm(buf []byte, tm Tm) int {
 	var n, ndigits int
 
-	if tm.Mday+1 < 10 {
+	if tm.Mday < 10 {
 		buf[n] = '0'
 		n++
 	}
@@ -95,7 +95,7 @@ func SlicePutTmRFC822(buf []byte, tm Tm) int {
 	buf[n+1] = ' '
 	n += 2
 
-	if tm.Mday+1 < 10 {
+	if tm.Mday < 10 {
 		buf[n] = '0'
 		n++
 	}

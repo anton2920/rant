@@ -17,9 +17,18 @@ type HTTPRequestParser struct {
 }
 
 type HTTPResponse struct {
-	Code        int
-	ContentType string
-	Body        []byte
+	/* Buf points to 'ctx.ResponseBuffer.RemainingSlice()'. Used directly for responses with known sizes. */
+	Buf []byte
+	Pos int
+
+	/* ContentLength points to stack-allocated buffer enough to hold 'Content-Length' header. */
+	ContentLength []byte
+
+	/* Body points to stack-allocated 64 KiB buffer. Used only for (*HTTPResponse).WriteResponse() calls. */
+	Body []byte
+
+	/* Date points to array with current date in RFC822 format, which updates every second by kevent timer. */
+	Date []byte
 }
 
 type HTTPContext struct {
@@ -52,12 +61,6 @@ const (
 )
 
 const (
-	HTTPHeaderContentLengthPrefix = `Content-Length: `
-	HTTPHeaderDatePrefix          = `Date: `
-	HTTPHeaderHost                = `Host: rant`
-)
-
-const (
 	HTTP_STATE_UNKNOWN = iota
 
 	HTTP_STATE_METHOD
@@ -68,11 +71,56 @@ const (
 	HTTP_STATE_DONE
 )
 
-const (
-	HTTP_EVENT_DECODE = iota
-	HTTP_EVENT_EXECUTE
-	HTTP_EVENT_WRITEBACK
-)
+func (w *HTTPResponse) AppendContentLength(contentLength int) {
+	var buf [10]byte
+	n := SlicePutPositiveInt(unsafe.Slice(&buf[0], len(buf)), contentLength)
+	w.Pos += copy(w.Buf[w.Pos:], "\r\nContent-Length: ")
+	w.Pos += copy(w.Buf[w.Pos:], unsafe.Slice(&buf[0], n))
+}
+
+func (w *HTTPResponse) StartResponse(code int, contentType string) {
+	switch code {
+	case HTTPStatusOK:
+		const statusLine = "HTTP/1.1 200 OK\r\nHost: rant\r\nDate: "
+		w.Pos += copy(w.Buf[w.Pos:], statusLine)
+		w.Pos += copy(w.Buf[w.Pos:], w.Date)
+		w.Pos += copy(w.Buf[w.Pos:], "\r\nContent-Type: ")
+		w.Pos += copy(w.Buf[w.Pos:], contentType)
+	default:
+		println(code)
+		panic("unknown status code; for errors use (*HTTPResponse).WriteBuiltinResponse()")
+	}
+}
+
+func (w *HTTPResponse) StartResponseWithSize(code int, contentType string, contentLength int) {
+	w.StartResponse(code, contentType)
+	w.AppendContentLength(contentLength)
+}
+
+func (w *HTTPResponse) FinishResponse() {
+	w.AppendContentLength(len(w.Body))
+	w.Pos += copy(w.Buf[w.Pos:], "\r\n\r\n")
+	w.Pos += copy(w.Buf[w.Pos:], w.Body)
+}
+
+func (w *HTTPResponse) WriteCompleteResponse(code int, contentType string, body []byte) {
+	w.StartResponseWithSize(code, contentType, len(body))
+	w.Pos += copy(w.Buf[w.Pos:], "\r\n\r\n")
+	w.Pos += copy(w.Buf[w.Pos:], body)
+}
+
+func (w *HTTPResponse) WriteResponseBody(buf []byte) {
+	w.Body = append(w.Body, buf...)
+}
+
+func (w *HTTPResponse) WriteBuiltinResponse(code int) {
+	switch code {
+	case HTTPStatusBadRequest:
+		w.Pos += copy(w.Buf[w.Pos:], unsafe.Slice(unsafe.StringData(HTTPResponseBadRequest), len(HTTPResponseBadRequest)))
+	case HTTPStatusNotFound:
+		w.Pos += copy(w.Buf[w.Pos:], unsafe.Slice(unsafe.StringData(HTTPResponseNotFound), len(HTTPResponseNotFound)))
+	}
+}
 
 /* NOTE(anton2920): Noescape hides a pointer from escape analysis. Noescape is the identity function but escape analysis doesn't think the output depends on the input. Noescape is inlined and currently compiles down to zero instructions. */
 //go:nosplit
@@ -88,9 +136,11 @@ func NewHTTPContext() unsafe.Pointer {
 	c.Parser.State = HTTP_STATE_METHOD
 
 	if c.RequestBuffer, err = NewCircularBuffer(PageSize); err != nil {
+		println("ERROR: failed to create request buffer:", err.Error())
 		return nil
 	}
-	if c.ResponseBuffer, err = NewCircularBuffer(128 * PageSize); err != nil {
+	if c.ResponseBuffer, err = NewCircularBuffer(2 * HugePageSize); err != nil {
+		println("ERROR: failed to create response buffer:", err.Error())
 		return nil
 	}
 
@@ -106,13 +156,7 @@ func GetContextAndCheck(ptr unsafe.Pointer) (*HTTPContext, uintptr) {
 	return ctx, check
 }
 
-func HTTPHandleRequests(wBuf *CircularBuffer, rBuf *CircularBuffer, rp *HTTPRequestParser, router HTTPRouter) int {
-	var nreqs int
-
-	var contentLengthBuf []byte
-	contentLengthBuf = make([]byte, len(HTTPHeaderContentLengthPrefix)+10)
-	copy(contentLengthBuf, []byte(HTTPHeaderContentLengthPrefix))
-
+func HTTPHandleRequests(wBuf *CircularBuffer, rBuf *CircularBuffer, rp *HTTPRequestParser, date []byte, router HTTPRouter) {
 	var w HTTPResponse
 	w.Body = make([]byte, 64*1024)
 
@@ -127,7 +171,7 @@ func HTTPHandleRequests(wBuf *CircularBuffer, rBuf *CircularBuffer, rp *HTTPRequ
 			case HTTP_STATE_UNKNOWN:
 				unconsumed := rBuf.UnconsumedString()
 				if len(unconsumed) < 2 {
-					return nreqs
+					return
 				}
 				if unconsumed[:2] == "\r\n" {
 					rBuf.Consume(len("\r\n"))
@@ -139,7 +183,7 @@ func HTTPHandleRequests(wBuf *CircularBuffer, rBuf *CircularBuffer, rp *HTTPRequ
 			case HTTP_STATE_METHOD:
 				unconsumed := rBuf.UnconsumedString()
 				if len(unconsumed) < 3 {
-					return nreqs
+					return
 				}
 				switch unconsumed[:3] {
 				case "GET":
@@ -147,7 +191,7 @@ func HTTPHandleRequests(wBuf *CircularBuffer, rBuf *CircularBuffer, rp *HTTPRequ
 				default:
 					copy(wBuf.RemainingSlice(), unsafe.Slice(unsafe.StringData(HTTPResponseMethodNotAllowed), len(HTTPResponseMethodNotAllowed)))
 					wBuf.Produce(len(HTTPResponseMethodNotAllowed))
-					return nreqs + 1
+					return
 				}
 				rBuf.Consume(len(r.Method) + 1)
 				rp.State = HTTP_STATE_URI
@@ -155,14 +199,14 @@ func HTTPHandleRequests(wBuf *CircularBuffer, rBuf *CircularBuffer, rp *HTTPRequ
 				unconsumed := rBuf.UnconsumedString()
 				lineEnd := FindChar(unconsumed, '\r')
 				if lineEnd == -1 {
-					return nreqs
+					return
 				}
 
 				uriEnd := FindChar(unconsumed[:lineEnd], ' ')
 				if uriEnd == -1 {
 					copy(wBuf.RemainingSlice(), unsafe.Slice(unsafe.StringData(HTTPResponseBadRequest), len(HTTPResponseBadRequest)))
 					wBuf.Produce(len(HTTPResponseBadRequest))
-					return nreqs + 1
+					return
 				}
 
 				queryStart := FindChar(unconsumed[:lineEnd], '?')
@@ -179,7 +223,7 @@ func HTTPHandleRequests(wBuf *CircularBuffer, rBuf *CircularBuffer, rp *HTTPRequ
 				if httpVersion[:len(httpVersionPrefix)] != httpVersionPrefix {
 					copy(wBuf.RemainingSlice(), unsafe.Slice(unsafe.StringData(HTTPResponseBadRequest), len(HTTPResponseBadRequest)))
 					wBuf.Produce(len(HTTPResponseBadRequest))
-					return nreqs + 1
+					return
 				}
 				r.Version = httpVersion[len(httpVersionPrefix):]
 				rBuf.Consume(len(r.URL.Path) + len(r.URL.Query) + 1 + len(httpVersionPrefix) + len(r.Version) + len("\r\n"))
@@ -188,7 +232,7 @@ func HTTPHandleRequests(wBuf *CircularBuffer, rBuf *CircularBuffer, rp *HTTPRequ
 				unconsumed := rBuf.UnconsumedString()
 				lineEnd := FindChar(unconsumed, '\r')
 				if lineEnd == -1 {
-					return nreqs
+					return
 				}
 				header := unconsumed[:lineEnd]
 				rBuf.Consume(len(header) + len("\r\n"))
@@ -196,55 +240,16 @@ func HTTPHandleRequests(wBuf *CircularBuffer, rBuf *CircularBuffer, rp *HTTPRequ
 			}
 		}
 
+		w.Buf = wBuf.RemainingSlice()
 		w.Body = w.Body[:0]
-		w.ContentType = ""
-
+		w.Date = date
 		router((*HTTPResponse)(Noescape(unsafe.Pointer(&w))), r)
-		// println("Executed:", r.Method, r.URL.Path, r.URL.Query, w.Code, w.ContentType, len(w.Body))
+		wBuf.Produce(w.Pos)
+		w.Pos = 0
 
-		remaining := wBuf.RemainingSlice()
-		switch w.Code {
-		case HTTPStatusOK:
-			const statusLine = "HTTP/1.1 200 OK\r\n"
-			var headers string
-			switch w.ContentType {
-			case "", "text/html":
-				headers = "\r\nContent-Type: text/html\r\n\r\n"
-			case "image/jpg":
-				headers = "\r\nContent-Type: image/jpg\r\nCache-Control: max-age=604800\r\n\r\n"
-			case "application/rss+xml":
-				headers = "\r\nContent-Type: application/rss+xml\r\n\r\n"
-			case "image/png":
-				headers = "\r\nContent-Type: image/png\r\nCache-Control: max-age=604800\r\n\r\n"
-			default:
-				panic("unknown Content-Type '" + w.ContentType + "'")
-			}
+		// println("Executed:", r.Method, r.URL.Path, r.URL.Query, string(w.Buf[:13]), w.Pos)
 
-			nlength := SlicePutPositiveInt(contentLengthBuf[len(HTTPHeaderContentLengthPrefix):], len(w.Body))
-			contentLengthHeader := contentLengthBuf[:len(HTTPHeaderContentLengthPrefix)+nlength]
-
-			offset := len(statusLine) + len(contentLengthHeader) + len(headers)
-			if offset+len(w.Body) > wBuf.RemainingSpace() {
-				return nreqs
-				println(offset+len(w.Body), ">", wBuf.RemainingSpace())
-				println(wBuf.Head, wBuf.Tail)
-				panic("increase response buffer size")
-			}
-
-			copy(remaining, []byte(statusLine))
-			copy(remaining[len(statusLine):], contentLengthHeader)
-			copy(remaining[len(statusLine)+len(contentLengthHeader):], headers)
-			copy(remaining[offset:], w.Body)
-			wBuf.Produce(offset + len(w.Body))
-		case HTTPStatusBadRequest:
-			copy(remaining, unsafe.Slice(unsafe.StringData(HTTPResponseBadRequest), len(HTTPResponseBadRequest)))
-			wBuf.Produce(len(HTTPResponseBadRequest))
-		case HTTPStatusNotFound:
-			copy(remaining, unsafe.Slice(unsafe.StringData(HTTPResponseNotFound), len(HTTPResponseNotFound)))
-			wBuf.Produce(len(HTTPResponseNotFound))
-		}
 		rp.State = HTTP_STATE_METHOD
-		nreqs++
 	}
 }
 
@@ -252,6 +257,8 @@ func HTTPWorker(l int32, router HTTPRouter) {
 	var pinner runtime.Pinner
 	var events [256]Kevent_t
 	var nevents, i int32
+	var tp Timespec
+	var date []byte
 	var kq int32
 	var n int
 
@@ -260,10 +267,19 @@ func HTTPWorker(l int32, router HTTPRouter) {
 	if kq = Kqueue(); kq < 0 {
 		Fatal("Failed to open kernel queue: ", int(kq))
 	}
-	event := Kevent_t{Ident: uintptr(l), Filter: EVFILT_READ, Flags: EV_ADD | EV_CLEAR}
-	if ret := Kevent(kq, unsafe.Slice(&event, 1), nil, nil); ret < 0 {
+	chlist := [...]Kevent_t{
+		{Ident: uintptr(l), Filter: EVFILT_READ, Flags: EV_ADD | EV_CLEAR},
+		{Ident: 1, Filter: EVFILT_TIMER, Flags: EV_ADD, Fflags: NOTE_SECONDS, Data: 1},
+	}
+	if ret := Kevent(kq, unsafe.Slice(&chlist[0], len(chlist)), nil, nil); ret < 0 {
 		Fatal("Failed to add event for listener socket: ", int(ret))
 	}
+
+	if ret := ClockGettime(CLOCK_REALTIME, &tp); ret < 0 {
+		Fatal("Failed to get current walltime: ", int(ret))
+	}
+	tp.Nsec = 0 /* NOTE(anton2920): we don't care about nanoseconds. */
+	date = make([]byte, 31)
 
 	ctxPool := NewPool(NewHTTPContext)
 
@@ -285,7 +301,8 @@ func HTTPWorker(l int32, router HTTPRouter) {
 
 			// runtime.Breakpoint()
 
-			if c == l {
+			switch c {
+			case l:
 				if c = Accept(l, nil, nil); c < 0 {
 					println("ERROR: failed to accept new connection: ", c)
 					continue
@@ -307,6 +324,10 @@ func HTTPWorker(l int32, router HTTPRouter) {
 					ctxPool.Put(unsafe.Pointer(ctx))
 					continue
 				}
+				continue
+			case 1:
+				tp.Sec += int64(e.Data)
+				SlicePutTmRFC822(date, TimeToTm(int(tp.Sec)))
 				continue
 			}
 
@@ -339,14 +360,18 @@ func HTTPWorker(l int32, router HTTPRouter) {
 				}
 				rBuf.Produce(n)
 
-				if n = HTTPHandleRequests(wBuf, rBuf, parser, router); n > 0 {
-					if n = int(Write(c, wBuf.UnconsumedSlice())); n < 0 {
-						println("ERROR: failed to write data to socket: ", n)
-						goto closeConnection
-					}
-					wBuf.Consume(n)
+				HTTPHandleRequests(wBuf, rBuf, parser, date, router)
+				if n = int(Write(c, wBuf.UnconsumedSlice())); n < 0 {
+					println("ERROR: failed to write data to socket: ", n)
+					goto closeConnection
 				}
+				wBuf.Consume(n)
 			case EVFILT_WRITE:
+				if (e.Flags & EV_EOF) != 0 {
+					// println("Client disconnected: ", e.Ident)
+					goto closeConnection
+				}
+
 				wBuf := &ctx.ResponseBuffer
 				if wBuf.UnconsumedLen() > 0 {
 					if n = int(Write(c, wBuf.UnconsumedSlice())); n < 0 {
@@ -390,7 +415,7 @@ func ListenAndServe(port uint16, router HTTPRouter) error {
 		return NewError("Failed to listen on the socket: ", int(ret))
 	}
 
-	const nworkers = 4
+	nworkers := runtime.GOMAXPROCS(0) / 2
 	for i := 0; i < nworkers-1; i++ {
 		go HTTPWorker(l, router)
 	}

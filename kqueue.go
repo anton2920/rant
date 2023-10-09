@@ -19,6 +19,7 @@ const (
 	EVFILT_READ  = -1
 	EVFILT_WRITE = -2
 	EVFILT_VNODE = -4
+	EVFILT_TIMER = -7
 
 	EV_ADD   = 0x0001
 	EV_CLEAR = 0x0020
@@ -26,6 +27,8 @@ const (
 	EV_EOF = 0x8000
 
 	NOTE_WRITE = 0x0002
+
+	NOTE_SECONDS = 0x00000001
 )
 
 func KqueueMonitor(eventlist []Kevent_t, cb KqueueCb) error {

@@ -21,6 +21,11 @@ type Timeval struct {
 	Sec, Usec int64
 }
 
+const (
+	/* See <sys/_clock_id.h>. */
+	CLOCK_REALTIME = 0
+)
+
 func TimeToTm(t int) Tm {
 	var tm Tm
 

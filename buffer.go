@@ -25,7 +25,7 @@ func NewCircularBuffer(size int) (CircularBuffer, error) {
 	var cb CircularBuffer
 
 	var buffer, rb unsafe.Pointer
-	var fd, ret int32
+	var fd, ret, flags int32
 
 	if size%int(PageSize) != 0 {
 		return CircularBuffer{}, NewError("size must be divisible by 4096", -size)
@@ -34,7 +34,7 @@ func NewCircularBuffer(size int) (CircularBuffer, error) {
 	/* NOTE(anton2920): this is just (*byte)(1). */
 	var SHM_ANON = unsafe.String((*byte)(unsafe.Pointer(uintptr(1))), 8)
 
-	if fd = ShmOpen(SHM_ANON, O_RDWR, 0); fd < 0 {
+	if fd = ShmOpen2(SHM_ANON, O_RDWR, 0, flags, nil); fd < 0 {
 		return CircularBuffer{}, NewError("Failed to open shared memory region: ", int(fd))
 	}
 

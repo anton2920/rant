@@ -15,14 +15,11 @@ func Accept(s int32, addr *SockAddr, addrlen *uint32) (ret int32) {
 
 //go:noescape
 //go:nosplit
-func RawBind(s int32, addr *SockAddr, addrlen uint32) int32
+func Bind(s int32, addr *SockAddr, addrlen uint32) int32
 
-func Bind(s int32, addr *SockAddr, addrlen uint32) (ret int32) {
-	SyscallEnter()
-	ret = RawBind(s, addr, addrlen)
-	SyscallExit()
-	return
-}
+//go:noescape
+//go:nosplit
+func ClockGettime(clockID int32, tp *Timespec) int32
 
 //go:nosplit
 func RawClose(fd int32) int32
@@ -39,24 +36,10 @@ func Exit(status int32)
 
 //go:noescape
 //go:nosplit
-func RawFstat(fd int32, sb *Stat) int32
-
-func Fstat(fd int32, sb *Stat) (ret int32) {
-	SyscallEnter()
-	ret = RawFstat(fd, sb)
-	SyscallExit()
-	return
-}
+func Fstat(fd int32, sb *Stat) int32
 
 //go:noescape
-func RawFtruncate(fd int32, length int64) int32
-
-func Ftruncate(fd int32, length int64) (ret int32) {
-	SyscallEnter()
-	ret = RawFtruncate(fd, length)
-	SyscallExit()
-	return
-}
+func Ftruncate(fd int32, length int64) int32
 
 //go:noescape
 //go:nosplit
@@ -70,45 +53,17 @@ func Kevent(kq int32, changelist []Kevent_t, eventlist []Kevent_t, timeout *Time
 }
 
 //go:nosplit
-func RawKqueue() int32
-
-func Kqueue() (ret int32) {
-	SyscallEnter()
-	ret = RawKqueue()
-	SyscallExit()
-	return
-}
+func Kqueue() int32
 
 //go:nosplit
-func RawListen(s int32, backlog int32) int32
-
-func Listen(s int32, backlog int32) (ret int32) {
-	SyscallEnter()
-	ret = RawListen(s, backlog)
-	SyscallExit()
-	return
-}
+func Listen(s int32, backlog int32) int32
 
 //go:nosplit
-func RawLseek(fd int32, offset int64, whence int32) int64
-
-func Lseek(fd int32, offset int64, whence int32) (ret int64) {
-	SyscallEnter()
-	ret = RawLseek(fd, offset, whence)
-	SyscallExit()
-	return
-}
+func Lseek(fd int32, offset int64, whence int32) int64
 
 //go:noescape
 //go:nosplit
-func RawMmap(addr unsafe.Pointer, len uint64, prot, flags, fd int32, offset int64) unsafe.Pointer
-
-func Mmap(addr unsafe.Pointer, len uint64, prot, flags, fd int32, offset int64) (ret unsafe.Pointer) {
-	SyscallEnter()
-	ret = RawMmap(addr, len, prot, flags, fd, offset)
-	SyscallExit()
-	return
-}
+func Mmap(addr unsafe.Pointer, len uint64, prot, flags, fd int32, offset int64) unsafe.Pointer
 
 //go:noescape
 //go:nosplit
@@ -145,45 +100,17 @@ func Read(fd int32, buf []byte) (ret int64) {
 
 //go:noescape
 //go:nosplit
-func RawSetsockopt(s, level, optname int32, optval unsafe.Pointer, optlen uint32) int32
-
-func Setsockopt(s, level, optname int32, optval unsafe.Pointer, optlen uint32) (ret int32) {
-	SyscallEnter()
-	ret = RawSetsockopt(s, level, optname, optval, optlen)
-	SyscallExit()
-	return
-}
+func Setsockopt(s, level, optname int32, optval unsafe.Pointer, optlen uint32) int32
 
 //go:noescape
 //go:nosplit
-func RawShmOpen2(path string, flags int32, mode uint16, shmflags int32, name unsafe.Pointer) int32
-
-func ShmOpen(path string, flags int32, mode uint16) (ret int32) {
-	SyscallEnter()
-	ret = RawShmOpen2(path, flags|O_CLOEXEC, mode, 0, nil)
-	SyscallExit()
-	return
-}
+func ShmOpen2(path string, flags int32, mode uint16, shmflags int32, name unsafe.Pointer) int32
 
 //go:nosplit
-func RawShutdown(s int32, how int32) int32
-
-func Shutdown(s int32, how int32) (ret int32) {
-	SyscallEnter()
-	ret = RawShutdown(s, how)
-	SyscallExit()
-	return
-}
+func Shutdown(s int32, how int32) int32
 
 //go:nosplit
-func RawSocket(domain, typ, protocol int32) int32
-
-func Socket(domain, typ, protocol int32) (ret int32) {
-	SyscallEnter()
-	ret = RawSocket(domain, typ, protocol)
-	SyscallExit()
-	return
-}
+func Socket(domain, typ, protocol int32) int32
 
 //go:noescape
 //go:nosplit
