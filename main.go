@@ -26,13 +26,13 @@ func IndexPageHandler(w *HTTPResponse, r *HTTPRequest) {
 
 	if r.URL.Query != "" {
 		if r.URL.Query[:len("Query=")] != "Query=" {
-			w.WriteBuiltinResponse(HTTPStatusBadRequest)
+			w.WriteBuiltinError(HTTPStatusBadRequest)
 			return
 		}
 
 		queryString = r.URL.Query[len("Query="):]
 		if len(queryString) > maxQueryLen {
-			w.WriteBuiltinResponse(HTTPStatusBadRequest)
+			w.WriteBuiltinError(HTTPStatusBadRequest)
 			return
 		}
 	}
@@ -41,51 +41,51 @@ func IndexPageHandler(w *HTTPResponse, r *HTTPRequest) {
 		var decodedQuery [maxQueryLen]byte
 		decodedLen, ok := URLDecode(unsafe.Slice(&decodedQuery[0], len(decodedQuery)), queryString)
 		if !ok {
-			w.WriteBuiltinResponse(HTTPStatusBadRequest)
+			w.WriteBuiltinError(HTTPStatusBadRequest)
 			return
 		}
 
-		w.StartResponse(HTTPStatusOK, "text/html")
-		w.WriteResponseBody(*IndexPage)
+		w.Start(HTTPStatusOK, "text/html")
+		w.WriteUnfinished(*IndexPage)
 		for i := len(TweetHTMLs) - 1; i >= 0; i-- {
 			if FindSubstring(unsafe.String(unsafe.SliceData(TweetTexts[i]), len(TweetTexts[i])), unsafe.String(&decodedQuery[0], decodedLen)) != -1 {
-				w.WriteResponseBody(TweetHTMLs[i])
+				w.WriteUnfinished(TweetHTMLs[i])
 			}
 		}
-		w.WriteResponseBody(*FinisherPage)
-		w.FinishResponse()
+		w.WriteUnfinished(*FinisherPage)
+		w.Finish()
 	} else {
-		w.WriteCompleteResponse(HTTPStatusOK, "text/html", IndexPageFull)
+		w.WriteComplete(HTTPStatusOK, "text/html", IndexPageFull)
 	}
 }
 
 func PlaintextHandler(w *HTTPResponse, r *HTTPRequest) {
-	w.WriteCompleteResponse(HTTPStatusOK, "text/plain", []byte("Hello, world!\n"))
+	w.WriteComplete(HTTPStatusOK, "text/plain", []byte("Hello, world!\n"))
 }
 
 func TweetPageHandler(w *HTTPResponse, r *HTTPRequest) {
 	id, ok := StrToPositiveInt(r.URL.Path[len("/tweet/"):])
 	if (!ok) || (id < 0) || (id > len(TweetHTMLs)-1) {
-		w.WriteBuiltinResponse(HTTPStatusNotFound)
+		w.WriteBuiltinError(HTTPStatusNotFound)
 		return
 	}
 
-	w.StartResponseWithSize(HTTPStatusOK, "text/html", len(*TweetPage)+len(TweetHTMLs[id])+len(*FinisherPage))
-	w.WriteResponseBody(*TweetPage)
-	w.WriteResponseBody(TweetHTMLs[id])
-	w.WriteResponseBody(*FinisherPage)
+	w.StartWithSize(HTTPStatusOK, "text/html", len(*TweetPage)+len(TweetHTMLs[id])+len(*FinisherPage))
+	w.WritePart(*TweetPage)
+	w.WritePart(TweetHTMLs[id])
+	w.WritePart(*FinisherPage)
 }
 
 func PhotoHandler(w *HTTPResponse, r *HTTPRequest) {
-	w.WriteCompleteResponse(HTTPStatusOK, "image/jpg\r\nCache-Control: max-age=604800", *Photo)
+	w.WriteComplete(HTTPStatusOK, "image/jpg\r\nCache-Control: max-age=604800", *Photo)
 }
 
 func RSSPageHandler(w *HTTPResponse, r *HTTPRequest) {
-	w.WriteCompleteResponse(HTTPStatusOK, "application/rss+xml", RSSPageFull)
+	w.WriteComplete(HTTPStatusOK, "application/rss+xml", RSSPageFull)
 }
 
 func RSSPhotoHandler(w *HTTPResponse, r *HTTPRequest) {
-	w.WriteCompleteResponse(HTTPStatusOK, "image/png\r\nCache-Control: max-age=604800", *RSSPhoto)
+	w.WriteComplete(HTTPStatusOK, "image/png\r\nCache-Control: max-age=604800", *RSSPhoto)
 }
 
 func Router(w *HTTPResponse, r *HTTPRequest) {
@@ -102,7 +102,7 @@ func Router(w *HTTPResponse, r *HTTPRequest) {
 	} else if r.URL.Path == "/rss.png" {
 		RSSPhotoHandler(w, r)
 	} else {
-		w.WriteBuiltinResponse(HTTPStatusNotFound)
+		w.WriteBuiltinError(HTTPStatusNotFound)
 	}
 }
 

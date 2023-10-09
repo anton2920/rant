@@ -78,7 +78,7 @@ func (w *HTTPResponse) AppendContentLength(contentLength int) {
 	w.Pos += copy(w.Buf[w.Pos:], unsafe.Slice(&buf[0], n))
 }
 
-func (w *HTTPResponse) StartResponse(code int, contentType string) {
+func (w *HTTPResponse) Start(code int, contentType string) {
 	switch code {
 	case HTTPStatusOK:
 		const statusLine = "HTTP/1.1 200 OK\r\nHost: rant\r\nDate: "
@@ -92,28 +92,32 @@ func (w *HTTPResponse) StartResponse(code int, contentType string) {
 	}
 }
 
-func (w *HTTPResponse) StartResponseWithSize(code int, contentType string, contentLength int) {
-	w.StartResponse(code, contentType)
+func (w *HTTPResponse) StartWithSize(code int, contentType string, contentLength int) {
+	w.Start(code, contentType)
 	w.AppendContentLength(contentLength)
+	w.Pos += copy(w.Buf[w.Pos:], "\r\n\r\n")
 }
 
-func (w *HTTPResponse) FinishResponse() {
+func (w *HTTPResponse) Finish() {
 	w.AppendContentLength(len(w.Body))
 	w.Pos += copy(w.Buf[w.Pos:], "\r\n\r\n")
 	w.Pos += copy(w.Buf[w.Pos:], w.Body)
 }
 
-func (w *HTTPResponse) WriteCompleteResponse(code int, contentType string, body []byte) {
-	w.StartResponseWithSize(code, contentType, len(body))
-	w.Pos += copy(w.Buf[w.Pos:], "\r\n\r\n")
+func (w *HTTPResponse) WriteComplete(code int, contentType string, body []byte) {
+	w.StartWithSize(code, contentType, len(body))
 	w.Pos += copy(w.Buf[w.Pos:], body)
 }
 
-func (w *HTTPResponse) WriteResponseBody(buf []byte) {
+func (w *HTTPResponse) WritePart(buf []byte) {
+	w.Pos += copy(w.Buf[w.Pos:], buf)
+}
+
+func (w *HTTPResponse) WriteUnfinished(buf []byte) {
 	w.Body = append(w.Body, buf...)
 }
 
-func (w *HTTPResponse) WriteBuiltinResponse(code int) {
+func (w *HTTPResponse) WriteBuiltinError(code int) {
 	switch code {
 	case HTTPStatusBadRequest:
 		w.Pos += copy(w.Buf[w.Pos:], unsafe.Slice(unsafe.StringData(HTTPResponseBadRequest), len(HTTPResponseBadRequest)))
