@@ -194,6 +194,7 @@ func HTTPHandleRequests(wBuf *CircularBuffer, rBuf *CircularBuffer, rp *HTTPRequ
 					r.Method = "GET"
 				default:
 					copy(wBuf.RemainingSlice(), unsafe.Slice(unsafe.StringData(HTTPResponseMethodNotAllowed), len(HTTPResponseMethodNotAllowed)))
+					rBuf.Reset()
 					wBuf.Produce(len(HTTPResponseMethodNotAllowed))
 					return
 				}
@@ -209,6 +210,7 @@ func HTTPHandleRequests(wBuf *CircularBuffer, rBuf *CircularBuffer, rp *HTTPRequ
 				uriEnd := FindChar(unconsumed[:lineEnd], ' ')
 				if uriEnd == -1 {
 					copy(wBuf.RemainingSlice(), unsafe.Slice(unsafe.StringData(HTTPResponseBadRequest), len(HTTPResponseBadRequest)))
+					rBuf.Reset()
 					wBuf.Produce(len(HTTPResponseBadRequest))
 					return
 				}
@@ -226,6 +228,7 @@ func HTTPHandleRequests(wBuf *CircularBuffer, rBuf *CircularBuffer, rp *HTTPRequ
 				httpVersion := unconsumed[uriEnd+1 : lineEnd]
 				if httpVersion[:len(httpVersionPrefix)] != httpVersionPrefix {
 					copy(wBuf.RemainingSlice(), unsafe.Slice(unsafe.StringData(HTTPResponseBadRequest), len(HTTPResponseBadRequest)))
+					rBuf.Reset()
 					wBuf.Produce(len(HTTPResponseBadRequest))
 					return
 				}
@@ -386,6 +389,8 @@ func HTTPWorker(l int32, router HTTPRouter) {
 
 		closeConnection:
 			ctx.Check = 1 - ctx.Check
+			ctx.RequestBuffer.Reset()
+			ctx.ResponseBuffer.Reset()
 			ctxPool.Put(unsafe.Pointer(ctx))
 			Shutdown(c, SHUT_WR)
 			Close(c)
