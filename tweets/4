@@ -1,0 +1,1 @@
+I've just wasted a couple of hours of my life because I accidentally removed part of /usr/local on friend's server. Conslusion: learn to use zfs snapshot and use it at least once in your life.
