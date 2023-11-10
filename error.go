@@ -21,30 +21,30 @@ const (
 )
 
 func (e E) Error() string {
-	var buffer [512]byte
+	var buf [512]byte
 
-	n := copy(buffer[:], e.Message)
-	if e.Code < 0 {
-		e.Code = -e.Code
+	n := copy(buf[:], e.Message)
+	buf[n] = ' '
+	n++
+
+	if e.Code != 0 {
+		n += SlicePutPositiveInt(buf[n:], e.Code)
 	}
-	n += SlicePutPositiveInt(buffer[n:], e.Code)
 
-	return string(unsafe.Slice(&buffer[0], n))
+	return string(unsafe.Slice(&buf[0], n))
 }
 
-func NewError(msg string, code int) error {
+func Error(msg string) error {
+	return error(E{Message: msg})
+}
+
+func ErrorWithCode(msg string, code int) error {
 	return error(E{Message: msg, Code: code})
 }
 
-func Fatal(msg string, code int) {
-	if code < 0 {
-		code = -code
+func SyscallError(msg string, errno uintptr) error {
+	if errno == 0 {
+		return nil
 	}
-	println(msg, code)
-	Exit(1)
-}
-
-func FatalError(err error) {
-	println(err.Error())
-	Exit(1)
+	return error(E{Message: msg, Code: int(errno)})
 }

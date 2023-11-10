@@ -12,53 +12,38 @@ const (
 	PATH_MAX = 1024
 )
 
-func ReadFull(fd int32, buf []byte) int64 {
-	var read, n int64
+func ReadFull(fd int32, buf []byte) (int64, error) {
+	var read int64
 	for read < int64(len(buf)) {
-		n = Read(fd, buf[read:])
-		if n == 0 {
-			return read
-		} else if n < 0 {
-			if -n != EINTR {
-				return n
+		n, err := Read(fd, buf[read:])
+		if err != nil {
+			code := err.(E).Code
+			if code != EINTR {
+				return n, err
 			}
 			continue
+		} else if n == 0 {
+			break
 		}
 		read += n
 	}
 
-	return int64(len(buf))
-}
-
-func WriteFull(fd int32, buf []byte) int64 {
-	var written, n int64
-	for written < int64(len(buf)) {
-		n = Write(fd, buf[written:])
-		if n == 0 {
-			return written
-		} else if n < 0 {
-			if -n != EINTR {
-				return n
-			}
-			continue
-		}
-		written += n
-	}
-
-	return int64(len(buf))
+	return read, nil
 }
 
 func ReadEntireFile(fd int32) ([]byte, error) {
-	var flen int64
-	if flen = Lseek(fd, 0, SEEK_END); flen < 0 {
-		return nil, NewError("Failed to get file length: ", int(flen))
+	flen, err := Lseek(fd, 0, SEEK_END)
+	if err != nil {
+		return nil, err
 	}
+
 	data := make([]byte, flen)
-	if ret := Lseek(fd, 0, SEEK_SET); ret < 0 {
-		return nil, NewError("Failed to seek to the beginning of the file: ", int(flen))
+	if _, err := Lseek(fd, 0, SEEK_SET); err != nil {
+		return nil, err
 	}
-	if n := ReadFull(fd, data); n < 0 {
-		return nil, NewError("Failed to read entire file: ", int(n))
+
+	if _, err := ReadFull(fd, data); err != nil {
+		return nil, err
 	}
 
 	return data, nil

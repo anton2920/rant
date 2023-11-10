@@ -33,7 +33,8 @@ STARTTIME=`date +%s`
 
 case $1 in
 	'' | debug)
-		run go build -o $PROJECT -race -gcflags='all=-N -l -d=checkptr=0' -asmflags='-I /usr/include'
+		CGO_ENABLED=1; export CGO_ENABLED
+		run go build -o $PROJECT -race -gcflags='all=-N -l -d=checkptr=0'
 		echo "Don't forget to clean up `go env GOCACHE` directory!"
 		;;
 	all)

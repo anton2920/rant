@@ -32,27 +32,25 @@ const (
 )
 
 func KqueueMonitor(eventlist []Kevent_t, cb KqueueCb) error {
-	var kq, nevents int32
-
-	if kq = Kqueue(); kq < 0 {
-		return NewError("Failed to open a kernel queue: ", int(kq))
+	kq, err := Kqueue()
+	if err != nil {
+		return err
 	}
 
-	if nevents = Kevent(kq, eventlist, nil, nil); nevents < 0 {
-		return NewError("Failed to register kernel events: ", int(nevents))
+	if _, err := Kevent(kq, eventlist, nil, nil); err != nil {
+		return err
 	}
 
 	var event Kevent_t
 	for {
-		if nevents = Kevent(kq, nil, unsafe.Slice(&event, 1), nil); nevents < 0 {
-			if -nevents != EINTR {
-				return NewError("Failed to get kernel events: ", int(nevents))
-			}
-			continue
-		} else if nevents > 0 {
-			if err := cb(event); err != nil {
+		if _, err := Kevent(kq, nil, unsafe.Slice(&event, 1), nil); err != nil {
+			code := err.(E).Code
+			if code != EINTR {
 				return err
 			}
+			continue
+		} else if err := cb(event); err != nil {
+			return err
 		}
 
 		/* NOTE(anton2920): sleep to prevent runaway events. */

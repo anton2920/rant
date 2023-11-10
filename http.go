@@ -263,27 +263,25 @@ func HTTPHandleRequests(wBuf *CircularBuffer, rBuf *CircularBuffer, rp *HTTPRequ
 func HTTPWorker(l int32, router HTTPRouter) {
 	var pinner runtime.Pinner
 	var events [256]Kevent_t
-	var nevents, i int32
 	var tp Timespec
 	var date []byte
-	var kq int32
-	var n int
 
 	runtime.LockOSThread()
 
-	if kq = Kqueue(); kq < 0 {
-		Fatal("Failed to open kernel queue: ", int(kq))
+	kq, err := Kqueue()
+	if err != nil {
+		FatalError("Failed to open kernel queue: ", err)
 	}
 	chlist := [...]Kevent_t{
 		{Ident: uintptr(l), Filter: EVFILT_READ, Flags: EV_ADD | EV_CLEAR},
 		{Ident: 1, Filter: EVFILT_TIMER, Flags: EV_ADD, Fflags: NOTE_SECONDS, Data: 1},
 	}
-	if ret := Kevent(kq, unsafe.Slice(&chlist[0], len(chlist)), nil, nil); ret < 0 {
-		Fatal("Failed to add event for listener socket: ", int(ret))
+	if _, err := Kevent(kq, unsafe.Slice(&chlist[0], len(chlist)), nil, nil); err != nil {
+		FatalError("Failed to add event for listener socket: ", err)
 	}
 
-	if ret := ClockGettime(CLOCK_REALTIME, &tp); ret < 0 {
-		Fatal("Failed to get current walltime: ", int(ret))
+	if err := ClockGettime(CLOCK_REALTIME, &tp); err != nil {
+		FatalError("Failed to get current walltime: ", err)
 	}
 	tp.Nsec = 0 /* NOTE(anton2920): we don't care about nanoseconds. */
 	date = make([]byte, 31)
@@ -291,13 +289,15 @@ func HTTPWorker(l int32, router HTTPRouter) {
 	ctxPool := NewPool(NewHTTPContext)
 
 	for {
-		if nevents = Kevent(kq, nil, unsafe.Slice(&events[0], len(events)), nil); nevents < 0 {
-			if -nevents == EINTR {
+		nevents, err := Kevent(kq, nil, unsafe.Slice(&events[0], len(events)), nil)
+		if err != nil {
+			code := err.(E).Code
+			if code == EINTR {
 				continue
 			}
-			println("ERROR: failed to get requested kernel events: ", nevents)
+			println("ERROR: failed to get requested kernel events: ", code)
 		}
-		for i = 0; i < nevents; i++ {
+		for i := 0; i < nevents; i++ {
 			e := events[i]
 			c := int32(e.Ident)
 
@@ -307,14 +307,15 @@ func HTTPWorker(l int32, router HTTPRouter) {
 
 			switch c {
 			case l:
-				if c = Accept(l, nil, nil); c < 0 {
-					println("ERROR: failed to accept new connection: ", c)
+				c, errno := Accept(l, nil, nil)
+				if c < 0 {
+					println("ERROR: failed to accept new connection: ", errno)
 					continue
 				}
 
 				ctx := (*HTTPContext)(ctxPool.Get())
 				if ctx == nil {
-					Fatal("Failed to acquire new HTTP context", 0)
+					Fatal("Failed to acquire new HTTP context")
 				}
 				pinner.Pin(ctx)
 
@@ -323,10 +324,9 @@ func HTTPWorker(l int32, router HTTPRouter) {
 					{Ident: uintptr(c), Filter: EVFILT_READ, Flags: EV_ADD | EV_CLEAR, Udata: udata},
 					{Ident: uintptr(c), Filter: EVFILT_WRITE, Flags: EV_ADD | EV_CLEAR, Udata: udata},
 				}
-				if ret := Kevent(kq, unsafe.Slice(&events[0], len(events)), nil, nil); ret < 0 {
-					println("ERROR: failed to add new events to kqueue", ret)
+				if _, err := Kevent(kq, unsafe.Slice(&events[0], len(events)), nil, nil); err != nil {
+					println("ERROR: failed to add new events to kqueue", err.Error())
 					ctxPool.Put(unsafe.Pointer(ctx))
-					continue
 				}
 				continue
 			case 1:
@@ -354,22 +354,24 @@ func HTTPWorker(l int32, router HTTPRouter) {
 
 				if rBuf.RemainingSpace() == 0 {
 					Shutdown(c, SHUT_RD)
-					WriteFull(c, unsafe.Slice(unsafe.StringData(HTTPResponseRequestEntityTooLarge), len(HTTPResponseRequestEntityTooLarge)))
+					Write(c, unsafe.Slice(unsafe.StringData(HTTPResponseRequestEntityTooLarge), len(HTTPResponseRequestEntityTooLarge)))
 					goto closeConnection
 				}
 
-				if n = int(Read(c, rBuf.RemainingSlice())); n < 0 {
-					println("ERROR: failed to read data from socket: ", n)
+				n, err := Read(c, rBuf.RemainingSlice())
+				if err != nil {
+					println("ERROR: failed to read data from socket: ", err.Error())
 					goto closeConnection
 				}
-				rBuf.Produce(n)
+				rBuf.Produce(int(n))
 
 				HTTPHandleRequests(wBuf, rBuf, parser, date, router)
-				if n = int(Write(c, wBuf.UnconsumedSlice())); n < 0 {
-					println("ERROR: failed to write data to socket: ", n)
+				n, err = Write(c, wBuf.UnconsumedSlice())
+				if err != nil {
+					println("ERROR: failed to write data to socket: ", err.Error())
 					goto closeConnection
 				}
-				wBuf.Consume(n)
+				wBuf.Consume(int(n))
 			case EVFILT_WRITE:
 				if (e.Flags & EV_EOF) != 0 {
 					// println("Client disconnected: ", e.Ident)
@@ -378,11 +380,12 @@ func HTTPWorker(l int32, router HTTPRouter) {
 
 				wBuf := &ctx.ResponseBuffer
 				if wBuf.UnconsumedLen() > 0 {
-					if n = int(Write(c, wBuf.UnconsumedSlice())); n < 0 {
-						println("ERROR: failed to write data to socket: ", n)
+					n, err := Write(c, wBuf.UnconsumedSlice())
+					if err != nil {
+						println("ERROR: failed to write data to socket: ", err.Error())
 						goto closeConnection
 					}
-					wBuf.Consume(n)
+					wBuf.Consume(int(n))
 				}
 			}
 			continue
@@ -400,28 +403,28 @@ func HTTPWorker(l int32, router HTTPRouter) {
 }
 
 func ListenAndServe(port uint16, router HTTPRouter) error {
-	var ret, l int32
-
-	if l = Socket(PF_INET, SOCK_STREAM, 0); l < 0 {
-		return NewError("Failed to create socket: ", int(l))
+	l, err := Socket(PF_INET, SOCK_STREAM, 0)
+	if err != nil {
+		return err
 	}
 
 	var enable int32 = 1
-	if ret = Setsockopt(l, SOL_SOCKET, SO_REUSEPORT, unsafe.Pointer(&enable), uint32(unsafe.Sizeof(enable))); ret != 0 {
-		return NewError("Failed to set socket option to reuse port: ", int(ret))
+	if err = Setsockopt(l, SOL_SOCKET, SO_REUSEPORT, unsafe.Pointer(&enable), uint32(unsafe.Sizeof(enable))); err != nil {
+		return err
 	}
 
 	addr := SockAddrIn{Family: AF_INET, Addr: INADDR_ANY, Port: SwapBytesInWord(port)}
-	if ret = Bind(l, &addr, uint32(unsafe.Sizeof(addr))); ret < 0 {
-		return NewError("Failed to bind socket to address: ", int(ret))
+	if err := Bind(l, &addr, uint32(unsafe.Sizeof(addr))); err != nil {
+		return err
 	}
 
 	const backlog = 128
-	if ret = Listen(l, backlog); ret < 0 {
-		return NewError("Failed to listen on the socket: ", int(ret))
+	if err := Listen(l, backlog); err != nil {
+		return err
 	}
 
-	nworkers := runtime.GOMAXPROCS(0) / 2
+	// nworkers := runtime.GOMAXPROCS(0) / 2
+	const nworkers = 1
 	for i := 0; i < nworkers-1; i++ {
 		go HTTPWorker(l, router)
 	}

@@ -1,12 +1,5 @@
 package main
 
-import "unsafe"
-
-type PageDescription struct {
-	Contents **[]byte
-	Filename string
-}
-
 var (
 	Pages       [15][]byte
 	PageKevents []Kevent_t
@@ -55,22 +48,16 @@ func MonitorPages() {
 		ConstructIndexPage()
 		return nil
 	}); err != nil {
-		FatalError(err)
+		FatalError("Failed to monitor pages:", err)
 	}
 }
 
 func ReadPage(name string) (*[]byte, error) {
 	var err error
 
-	var nameBuf [2 * PATH_MAX]byte
-	var fd int32
-
-	/* NOTE(anton2920): this sh**t is needed, because open(2) requires '\0'-terminated string. */
-	for i := 0; i < len(name); i++ {
-		nameBuf[i] = name[i]
-	}
-	if fd = Open(unsafe.String(&nameBuf[0], len(name)+1), O_RDONLY, 0); fd < 0 {
-		return nil, NewError("Failed to open '"+name+"': ", int(fd))
+	fd, err := Open(name, O_RDONLY, 0)
+	if err != nil {
+		return nil, err
 	}
 	PageKevents = append(PageKevents, Kevent_t{Ident: uintptr(fd), Filter: EVFILT_VNODE, Flags: EV_ADD | EV_CLEAR, Fflags: NOTE_WRITE})
 
@@ -81,14 +68,9 @@ func ReadPage(name string) (*[]byte, error) {
 	return &Pages[fd], nil
 }
 
-func ReadPages(ps []PageDescription) error {
-	var err error
-
-	for _, p := range ps {
-		if *p.Contents, err = ReadPage(p.Filename); err != nil {
-			return err
-		}
+func Must[T any](ret T, err error) T {
+	if err != nil {
+		FatalError("Actiion must succeed, but it failed:", err)
 	}
-
-	return nil
+	return ret
 }

@@ -22,8 +22,6 @@ func ReadTweets() error {
 	const tweetRSSBeforeDate = `</link><pubDate>`
 	const tweetRSSAfterDate = `</pubDate></item>`
 
-	var err error
-
 	var pathBuf [PATH_MAX]byte
 
 	var idBuf [10]byte
@@ -32,38 +30,40 @@ func ReadTweets() error {
 	var dateBuf [50]byte
 	var dateBufLen int
 
-	var text []byte
-
-	var fd int32
 	var st Stat
-
-	copy(unsafe.Slice(&pathBuf[0], len(pathBuf)), []byte(tweetsPath))
 
 	TweetTexts = TweetTexts[:0]
 	TweetHTMLs = TweetHTMLs[:0]
 	TweetRSSs = TweetRSSs[:0]
 
+	copy(unsafe.Slice(&pathBuf[0], len(pathBuf)), []byte(tweetsPath))
+
 	for i := 0; ; i++ {
 		idBufLen = SlicePutPositiveInt(unsafe.Slice(&idBuf[0], len(idBuf)), i)
 		copy(unsafe.Slice(&pathBuf[len(tweetsPath)], len(pathBuf)-len(tweetsPath)), unsafe.Slice(&idBuf[0], idBufLen))
 
-		if fd = Open(unsafe.String(&pathBuf[0], len(pathBuf)), O_RDONLY, 0); fd < 0 {
-			if -fd != ENOENT {
-				return NewError("Failed to open '"+string(pathBuf[:])+"': ", int(fd))
+		fd, err := Open(unsafe.String(&pathBuf[0], len(pathBuf)), O_RDONLY, 0)
+		if err != nil {
+			code := err.(E).Code
+			if code == ENOENT {
+				break
 			}
-			return nil
+			return err
 		}
-		if ret := Fstat(fd, &st); ret < 0 {
-			return NewError("Failed to get stat of '"+string(pathBuf[:])+"': ", int(ret))
+		defer Close(fd)
+
+		if err := Fstat(fd, &st); err != nil {
+			return err
 		}
+
 		tm := TimeToTm(int(st.Birthtime.Sec))
 		dateBufLen = SlicePutTm(unsafe.Slice(&dateBuf[0], len(dateBuf)), tm)
 
-		if text, err = ReadEntireFile(fd); err != nil {
+		text := make([]byte, st.Size)
+		if _, err := ReadFull(fd, text); err != nil {
 			return err
 		}
 		TweetTexts = append(TweetTexts, text)
-		Close(fd)
 
 		tweet := make([]byte, 0, 4*1024)
 		tweet = append(tweet, tweetHTMLBeforeDate...)
@@ -89,14 +89,15 @@ func ReadTweets() error {
 		tweet = append(tweet, tweetRSSAfterDate...)
 		TweetRSSs = append(TweetRSSs, tweet)
 	}
+
+	return nil
 }
 
 func MonitorTweets() {
-	var fd int32
-
-	const tweetsDir = "./tweets\x00"
-	if fd = Open(tweetsDir, O_RDONLY, 0); fd < 0 {
-		Fatal("Failed to open '"+tweetsDir+"': ", int(fd))
+	const tweetsDir = "./tweets"
+	fd, err := Open(tweetsDir, O_RDONLY, 0)
+	if err != nil {
+		FatalError("Failed to open '"+tweetsDir+"': ", err)
 	}
 
 	tweetsKevent := Kevent_t{Ident: uintptr(fd), Filter: EVFILT_VNODE, Flags: EV_ADD | EV_CLEAR, Fflags: NOTE_WRITE}
@@ -109,6 +110,6 @@ func MonitorTweets() {
 		ConstructRSSPage()
 		return nil
 	}); err != nil {
-		FatalError(err)
+		FatalError("Failed to monitor tweets: ", err)
 	}
 }

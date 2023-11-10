@@ -107,21 +107,17 @@ func Router(w *HTTPResponse, r *HTTPRequest) {
 }
 
 func main() {
-	if err := ReadPages([]PageDescription{
-		{&IndexPage, "pages/index.html"},
-		{&TweetPage, "pages/tweet.html"},
-		{&FinisherPage, "pages/finisher.html"},
-		{&Photo, "pages/photo.jpg"},
-		{&RSSPage, "pages/index.rss"},
-		{&RSSFinisher, "pages/finisher.rss"},
-		{&RSSPhoto, "pages/rss.png"},
-	}); err != nil {
-		FatalError(err)
-	}
+	IndexPage = Must(ReadPage("pages/index.html"))
+	TweetPage = Must(ReadPage("pages/tweet.html"))
+	FinisherPage = Must(ReadPage("pages/finisher.html"))
+	Photo = Must(ReadPage("pages/photo.jpg"))
+	RSSPage = Must(ReadPage("pages/index.rss"))
+	RSSFinisher = Must(ReadPage("pages/finisher.rss"))
+	RSSPhoto = Must(ReadPage("pages/rss.png"))
 	go MonitorPages()
 
 	if err := ReadTweets(); err != nil {
-		FatalError(err)
+		FatalError("Failed to read tweets: ", err)
 	}
 	go MonitorTweets()
 
@@ -131,6 +127,6 @@ func main() {
 	const port = 7070
 	println("Listening on 0.0.0.0:7070...")
 	if err := ListenAndServe(port, Router); err != nil {
-		FatalError(err)
+		FatalError("Failed to start HTTP server: ", err)
 	}
 }
