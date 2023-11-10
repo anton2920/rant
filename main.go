@@ -45,22 +45,22 @@ func IndexPageHandler(w *HTTPResponse, r *HTTPRequest) {
 			return
 		}
 
-		w.Start(HTTPStatusOK, "text/html")
-		w.WriteUnfinished(*IndexPage)
-		for i := len(TweetHTMLs) - 1; i >= 0; i-- {
-			if FindSubstring(unsafe.String(unsafe.SliceData(TweetTexts[i]), len(TweetTexts[i])), unsafe.String(&decodedQuery[0], decodedLen)) != -1 {
-				w.WriteUnfinished(TweetHTMLs[i])
+		w.WriteResponseNoCopyFunc("text/html", func(w *HTTPResponse) {
+			w.WriteBodyNoCopy(*IndexPage)
+			for i := len(TweetHTMLs) - 1; i >= 0; i-- {
+				if FindSubstring(unsafe.String(unsafe.SliceData(TweetTexts[i]), len(TweetTexts[i])), unsafe.String(&decodedQuery[0], decodedLen)) != -1 {
+					w.WriteBodyNoCopy(TweetHTMLs[i])
+				}
 			}
-		}
-		w.WriteUnfinished(*FinisherPage)
-		w.Finish()
+			w.WriteBodyNoCopy(*FinisherPage)
+		})
 	} else {
-		w.WriteComplete(HTTPStatusOK, "text/html", IndexPageFull)
+		w.WriteResponseNoCopy("text/html", IndexPageFull)
 	}
 }
 
 func PlaintextHandler(w *HTTPResponse, r *HTTPRequest) {
-	w.WriteComplete(HTTPStatusOK, "text/plain", []byte("Hello, world!\n"))
+	w.WriteResponseNoCopy("text/plain", []byte("Hello, world!\n"))
 }
 
 func TweetPageHandler(w *HTTPResponse, r *HTTPRequest) {
@@ -70,22 +70,23 @@ func TweetPageHandler(w *HTTPResponse, r *HTTPRequest) {
 		return
 	}
 
-	w.StartWithSize(HTTPStatusOK, "text/html", len(*TweetPage)+len(TweetHTMLs[id])+len(*FinisherPage))
-	w.WritePart(*TweetPage)
-	w.WritePart(TweetHTMLs[id])
-	w.WritePart(*FinisherPage)
+	w.WriteResponseNoCopyFunc("text/html", func(w *HTTPResponse) {
+		w.WriteBodyNoCopy(*TweetPage)
+		w.WriteBodyNoCopy(TweetHTMLs[id])
+		w.WriteBodyNoCopy(*FinisherPage)
+	})
 }
 
 func PhotoHandler(w *HTTPResponse, r *HTTPRequest) {
-	w.WriteComplete(HTTPStatusOK, "image/jpg\r\nCache-Control: max-age=604800", *Photo)
+	w.WriteResponseNoCopy("image/jpg\r\nCache-Control: max-age=604800", *Photo)
 }
 
 func RSSPageHandler(w *HTTPResponse, r *HTTPRequest) {
-	w.WriteComplete(HTTPStatusOK, "application/rss+xml", RSSPageFull)
+	w.WriteResponseNoCopy("application/rss+xml", RSSPageFull)
 }
 
 func RSSPhotoHandler(w *HTTPResponse, r *HTTPRequest) {
-	w.WriteComplete(HTTPStatusOK, "image/png\r\nCache-Control: max-age=604800", *RSSPhoto)
+	w.WriteResponseNoCopy("image/png\r\nCache-Control: max-age=604800", *RSSPhoto)
 }
 
 func Router(w *HTTPResponse, r *HTTPRequest) {
