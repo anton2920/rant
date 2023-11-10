@@ -75,7 +75,7 @@ const (
 
 func (w *HTTPResponse) AppendContentLength(contentLength int) {
 	var buf [10]byte
-	n := SlicePutPositiveInt(unsafe.Slice(&buf[0], len(buf)), contentLength)
+	n := SlicePutInt(unsafe.Slice(&buf[0], len(buf)), contentLength)
 	w.Pos += copy(w.Buf[w.Pos:], "\r\nContent-Length: ")
 	w.Pos += copy(w.Buf[w.Pos:], unsafe.Slice(&buf[0], n))
 }

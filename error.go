@@ -28,7 +28,7 @@ func (e E) Error() string {
 	n++
 
 	if e.Code != 0 {
-		n += SlicePutPositiveInt(buf[n:], e.Code)
+		n += SlicePutInt(buf[n:], e.Code)
 	}
 
 	return string(unsafe.Slice(&buf[0], n))

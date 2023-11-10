@@ -1,12 +1,18 @@
 package main
 
-func SlicePutPositiveInt(buf []byte, x int) int {
+func SlicePutInt(buf []byte, x int) int {
 	var ndigits int
-	var rx int
+	var rx, i int
 
 	if x == 0 {
 		buf[0] = '0'
 		return 1
+	}
+
+	if x < 0 {
+		x = -x
+		buf[0] = '-'
+		i++
 	}
 
 	for x > 0 {
@@ -15,9 +21,10 @@ func SlicePutPositiveInt(buf []byte, x int) int {
 		ndigits++
 	}
 
-	var i int
-	for i = 0; ndigits > 0; i++ {
+	for ndigits > 0 {
 		buf[i] = byte((rx % 10) + '0')
+		i++
+
 		rx /= 10
 		ndigits--
 	}
@@ -31,7 +38,7 @@ func SlicePutTm(buf []byte, tm Tm) int {
 		buf[n] = '0'
 		n++
 	}
-	ndigits = SlicePutPositiveInt(buf[n:], tm.Mday)
+	ndigits = SlicePutInt(buf[n:], tm.Mday)
 	n += ndigits
 	buf[n] = '.'
 	n++
@@ -40,12 +47,12 @@ func SlicePutTm(buf []byte, tm Tm) int {
 		buf[n] = '0'
 		n++
 	}
-	ndigits = SlicePutPositiveInt(buf[n:], tm.Mon+1)
+	ndigits = SlicePutInt(buf[n:], tm.Mon+1)
 	n += ndigits
 	buf[n] = '.'
 	n++
 
-	ndigits = SlicePutPositiveInt(buf[n:], tm.Year+1900)
+	ndigits = SlicePutInt(buf[n:], tm.Year+1900)
 	n += ndigits
 	buf[n] = ' '
 	n++
@@ -54,7 +61,7 @@ func SlicePutTm(buf []byte, tm Tm) int {
 		buf[n] = '0'
 		n++
 	}
-	ndigits = SlicePutPositiveInt(buf[n:], tm.Hour)
+	ndigits = SlicePutInt(buf[n:], tm.Hour)
 	n += ndigits
 	buf[n] = ':'
 	n++
@@ -63,7 +70,7 @@ func SlicePutTm(buf []byte, tm Tm) int {
 		buf[n] = '0'
 		n++
 	}
-	ndigits = SlicePutPositiveInt(buf[n:], tm.Min)
+	ndigits = SlicePutInt(buf[n:], tm.Min)
 	n += ndigits
 	buf[n] = ':'
 	n++
@@ -72,7 +79,7 @@ func SlicePutTm(buf []byte, tm Tm) int {
 		buf[n] = '0'
 		n++
 	}
-	ndigits = SlicePutPositiveInt(buf[n:], tm.Sec)
+	ndigits = SlicePutInt(buf[n:], tm.Sec)
 	n += ndigits
 	buf[n] = ' '
 	n++
@@ -99,7 +106,7 @@ func SlicePutTmRFC822(buf []byte, tm Tm) int {
 		buf[n] = '0'
 		n++
 	}
-	ndigits = SlicePutPositiveInt(buf[n:], tm.Mday)
+	ndigits = SlicePutInt(buf[n:], tm.Mday)
 	n += ndigits
 	buf[n] = ' '
 	n++
@@ -108,7 +115,7 @@ func SlicePutTmRFC822(buf []byte, tm Tm) int {
 	buf[n] = ' '
 	n++
 
-	ndigits = SlicePutPositiveInt(buf[n:], tm.Year+1900)
+	ndigits = SlicePutInt(buf[n:], tm.Year+1900)
 	n += ndigits
 	buf[n] = ' '
 	n++
@@ -117,7 +124,7 @@ func SlicePutTmRFC822(buf []byte, tm Tm) int {
 		buf[n] = '0'
 		n++
 	}
-	ndigits = SlicePutPositiveInt(buf[n:], tm.Hour)
+	ndigits = SlicePutInt(buf[n:], tm.Hour)
 	n += ndigits
 	buf[n] = ':'
 	n++
@@ -126,7 +133,7 @@ func SlicePutTmRFC822(buf []byte, tm Tm) int {
 		buf[n] = '0'
 		n++
 	}
-	ndigits = SlicePutPositiveInt(buf[n:], tm.Min)
+	ndigits = SlicePutInt(buf[n:], tm.Min)
 	n += ndigits
 	buf[n] = ':'
 	n++
@@ -135,7 +142,7 @@ func SlicePutTmRFC822(buf []byte, tm Tm) int {
 		buf[n] = '0'
 		n++
 	}
-	ndigits = SlicePutPositiveInt(buf[n:], tm.Sec)
+	ndigits = SlicePutInt(buf[n:], tm.Sec)
 	n += ndigits
 	buf[n] = ' '
 	n++

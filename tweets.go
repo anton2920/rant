@@ -39,7 +39,7 @@ func ReadTweets() error {
 	copy(unsafe.Slice(&pathBuf[0], len(pathBuf)), []byte(tweetsPath))
 
 	for i := 0; ; i++ {
-		idBufLen = SlicePutPositiveInt(unsafe.Slice(&idBuf[0], len(idBuf)), i)
+		idBufLen = SlicePutInt(unsafe.Slice(&idBuf[0], len(idBuf)), i)
 		copy(unsafe.Slice(&pathBuf[len(tweetsPath)], len(pathBuf)-len(tweetsPath)), unsafe.Slice(&idBuf[0], idBufLen))
 
 		fd, err := Open(unsafe.String(&pathBuf[0], len(pathBuf)), O_RDONLY, 0)
