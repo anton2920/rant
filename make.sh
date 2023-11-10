@@ -41,11 +41,11 @@ case $1 in
 		;;
 	disas | disasm | disassembly)
 		printv go build -pgo off -gcflags="-S"
-		go build -gcflags="-S" >$PROJECT.s 2>&1
+		go build -gcflags="-S" >$PROJECT.disas 2>&1
 		;;
 	esc | escape | escape-analysis)
-		printv go build -pgo off -gcflags="-m2"
-		go build -gcflags="-m2" >$PROJECT.m 2>&1
+		printv go build -pgo off -gcflags="-m -m"
+		go build -gcflags="-m -m" >$PROJECT.m 2>&1
 		;;
 	fmt)
 		if which goimports >/dev/null; then
@@ -64,7 +64,7 @@ case $1 in
 		sed -e '3a\'$'\n''import _ "net/http/pprof"' -e '3a\'$'\n''import "net/http"' -e '/func main/a\'$'\n''go http.ListenAndServe(":9090", nil)' main.go >new_main
 		mv new_main main.go
 
-		run go build -o $PROJECT -asmflags="-I /usr/include" -ldflags='-s -w'
+		run $0 $VERBOSITYFLAGS release
 		mv main_back main.go
 
 		echo "Profiling for 60 seconds..."
@@ -74,10 +74,14 @@ case $1 in
 		kill $PID
 		;;
 	release)
-		go build -o $PROJECT -ldflags="-s -w"
+		run go build -o $PROJECT -ldflags="-s -w"
 		;;
 	vet)
 		run go vet -asmdecl -assign -atomic -bools -buildtag -cgocall -composites -copylocks -directive -errorsas -framepointer -httpresponse -ifaceassert -loopclosure -lostcancel -nilfunc -printf -shift -sigchanyzer -slog -stdmethods -stringintconv -structtag -testinggoroutine -tests -timeformat -unmarshal -unreachable -unusedresult
+		;;
+	*)
+		echo "Target $1 is not supported"
+		exit 1
 		;;
 esac
 

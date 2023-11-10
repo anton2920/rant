@@ -66,7 +66,7 @@ func ClockGettime(clockID int32, tp *Timespec) error {
 }
 
 func Close(fd int32) error {
-	_, _, errno := Syscall(SYS_bind, uintptr(fd), 0, 0)
+	_, _, errno := Syscall(SYS_close, uintptr(fd), 0, 0)
 	return SyscallError("close failed with code", errno)
 }
 

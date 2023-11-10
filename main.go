@@ -60,7 +60,8 @@ func IndexPageHandler(w *HTTPResponse, r *HTTPRequest) {
 }
 
 func PlaintextHandler(w *HTTPResponse, r *HTTPRequest) {
-	w.WriteResponseNoCopy("text/plain", []byte("Hello, world!\n"))
+	const response = "Hello, world!\n"
+	w.WriteResponseNoCopy("text/plain", unsafe.Slice(unsafe.StringData(response), len(response)))
 }
 
 func TweetPageHandler(w *HTTPResponse, r *HTTPRequest) {

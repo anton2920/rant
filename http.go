@@ -74,14 +74,8 @@ const (
 )
 
 func (w *HTTPResponse) WriteResponseNoCopyFunc(contentType string, f func(*HTTPResponse)) {
-	*w.Iov = append(*w.Iov, IovecForString("HTTP/1.1 200 OK\r\nHost: rant\r\nDate: "))
-	*w.Iov = append(*w.Iov, IovecForByteSlice(w.DateBuf))
-	*w.Iov = append(*w.Iov, IovecForString("\r\nContent-Type: "))
-	*w.Iov = append(*w.Iov, IovecForString(contentType))
-	*w.Iov = append(*w.Iov, IovecForString("\r\nContent-Length: "))
-	*w.Iov = append(*w.Iov, IovecForByteSlice(w.ContentLengthBuf))
-	contentLengthIdx := len(*w.Iov) - 1
-	*w.Iov = append(*w.Iov, IovecForString("\r\n\r\n"))
+	*w.Iov = append(*w.Iov, IovecForString("HTTP/1.1 200 OK\r\nHost: rant\r\nDate: "), IovecForByteSlice(w.DateBuf), IovecForString("\r\nContent-Type: "), IovecForString(contentType), IovecForString("\r\nContent-Length: "), IovecForByteSlice(w.ContentLengthBuf), IovecForString("\r\n\r\n"))
+	contentLengthIdx := len(*w.Iov) - 2
 
 	f(w)
 
@@ -89,21 +83,23 @@ func (w *HTTPResponse) WriteResponseNoCopyFunc(contentType string, f func(*HTTPR
 	(*w.Iov)[contentLengthIdx].Len = uint64(n)
 }
 
-func (w *HTTPResponse) WriteBodyNoCopy(buf []byte) {
-	*w.Iov = append(*w.Iov, IovecForByteSlice(buf))
-	w.ContentLength += len(buf)
+func (w *HTTPResponse) WriteBodyNoCopy(body []byte) {
+	*w.Iov = append(*w.Iov, IovecForByteSlice(body))
+	w.ContentLength += len(body)
 }
 
 func (w *HTTPResponse) WriteResponseNoCopy(contentType string, body []byte) {
-	w.WriteResponseNoCopyFunc(contentType, func(w *HTTPResponse) {
-		w.WriteBodyNoCopy(body)
-	})
+	n := SlicePutInt(w.ContentLengthBuf, len(body))
+
+	*w.Iov = append(*w.Iov, IovecForString("HTTP/1.1 200 OK\r\nHost: rant\r\nDate: "), IovecForByteSlice(w.DateBuf), IovecForString("\r\nContent-Type: "), IovecForString(contentType), IovecForString("\r\nContent-Length: "), IovecForByteSlice(w.ContentLengthBuf[:n]), IovecForString("\r\n\r\n"), IovecForByteSlice(body))
 }
 
 func (w *HTTPResponse) WriteBuiltinError(code int) {
 	switch code {
 	case HTTPStatusBadRequest:
+		*w.Iov = append(*w.Iov, IovecForString(HTTPResponseBadRequest))
 	case HTTPStatusNotFound:
+		*w.Iov = append(*w.Iov, IovecForString(HTTPResponseNotFound))
 	}
 }
 
@@ -124,7 +120,7 @@ func NewHTTPContext() unsafe.Pointer {
 		println("ERROR: failed to create request buffer:", err.Error())
 		return nil
 	}
-	c.ResponseIov = make([]Iovec, 256)
+	c.ResponseIov = make([]Iovec, 0, 256)
 
 	return unsafe.Pointer(c)
 }
@@ -169,7 +165,7 @@ func HTTPHandleRequests(wIov *[]Iovec, rBuf *CircularBuffer, rp *HTTPRequestPars
 				case "GET":
 					r.Method = "GET"
 				default:
-					*wIov = []Iovec{IovecForString(HTTPResponseMethodNotAllowed)}
+					*wIov = append(*wIov, IovecForString(HTTPResponseMethodNotAllowed))
 					return
 				}
 				rBuf.Consume(len(r.Method) + 1)
@@ -183,7 +179,7 @@ func HTTPHandleRequests(wIov *[]Iovec, rBuf *CircularBuffer, rp *HTTPRequestPars
 
 				uriEnd := FindChar(unconsumed[:lineEnd], ' ')
 				if uriEnd == -1 {
-					*wIov = []Iovec{IovecForString(HTTPResponseBadRequest)}
+					*wIov = append(*wIov, IovecForString(HTTPResponseBadRequest))
 					return
 				}
 
@@ -199,7 +195,7 @@ func HTTPHandleRequests(wIov *[]Iovec, rBuf *CircularBuffer, rp *HTTPRequestPars
 				const httpVersionPrefix = "HTTP/"
 				httpVersion := unconsumed[uriEnd+1 : lineEnd]
 				if httpVersion[:len(httpVersionPrefix)] != httpVersionPrefix {
-					*wIov = []Iovec{IovecForString(HTTPResponseBadRequest)}
+					*wIov = append(*wIov, IovecForString(HTTPResponseBadRequest))
 					return
 				}
 				r.Version = httpVersion[len(httpVersionPrefix):]
@@ -219,6 +215,7 @@ func HTTPHandleRequests(wIov *[]Iovec, rBuf *CircularBuffer, rp *HTTPRequestPars
 
 		w.Iov = wIov
 		w.DateBuf = dateBuf
+		w.ContentLength = 0
 		w.ContentLengthBuf = contentLengthBuf
 		router((*HTTPResponse)(Noescape(unsafe.Pointer(&w))), r)
 
@@ -314,13 +311,11 @@ func HTTPWorker(l int32, router HTTPRouter) {
 				}
 
 				rBuf := &ctx.RequestBuffer
-				wIov := &ctx.ResponseIov
 				parser := &ctx.Parser
 
 				if rBuf.RemainingSpace() == 0 {
 					Shutdown(c, SHUT_RD)
-					*wIov = append(*wIov, IovecForString(HTTPResponseRequestEntityTooLarge))
-					Writev(c, *wIov)
+					Writev(c, []Iovec{IovecForString(HTTPResponseRequestEntityTooLarge)})
 					goto closeConnection
 				}
 
@@ -331,30 +326,49 @@ func HTTPWorker(l int32, router HTTPRouter) {
 				}
 				rBuf.Produce(int(n))
 
-				HTTPHandleRequests(wIov, rBuf, parser, contentLengthBuf, dateBuf, router)
-				fallthrough
+				HTTPHandleRequests(&ctx.ResponseIov, rBuf, parser, contentLengthBuf, dateBuf, router)
+
+				wIov := ctx.ResponseIov
+				n, err = Writev(c, wIov[ctx.ResponsePos:])
+				if err != nil {
+					println("ERROR: failed to write data to socket:", err.Error())
+					goto closeConnection
+				}
+
+				for (ctx.ResponsePos < len(wIov)) && (n >= int64(wIov[ctx.ResponsePos].Len)) {
+					n -= int64(wIov[ctx.ResponsePos].Len)
+					ctx.ResponsePos++
+				}
+				if ctx.ResponsePos == len(wIov) {
+					ctx.ResponsePos = 0
+					ctx.ResponseIov = ctx.ResponseIov[:0]
+				} else {
+					wIov[ctx.ResponsePos].Base = unsafe.Add(wIov[ctx.ResponsePos].Base, n)
+					wIov[ctx.ResponsePos].Len -= uint64(n)
+				}
 			case EVFILT_WRITE:
 				if (e.Flags & EV_EOF) != 0 {
 					goto closeConnection
 				}
 
-				wIov := &ctx.ResponseIov
-				if len((*wIov)[ctx.ResponsePos:]) > 0 {
-					n, err := Writev(c, (*wIov)[ctx.ResponsePos:])
+				wIov := ctx.ResponseIov
+				if len(wIov[ctx.ResponsePos:]) > 0 {
+					n, err := Writev(c, wIov[ctx.ResponsePos:])
 					if err != nil {
 						println("ERROR: failed to write data to socket:", err.Error())
 						goto closeConnection
 					}
 
-					var i int
-					var nbytes int64
-					for i = 0; (nbytes < n) && (i < len(*wIov)); i++ {
-						nbytes += int64((*wIov)[i].Len)
+					for (ctx.ResponsePos < len(wIov)) && (n >= int64(wIov[ctx.ResponsePos].Len)) {
+						n -= int64(wIov[ctx.ResponsePos].Len)
+						ctx.ResponsePos++
 					}
-					ctx.ResponsePos += i
-					if ctx.ResponsePos == len(*wIov) {
+					if ctx.ResponsePos == len(wIov) {
 						ctx.ResponsePos = 0
-						*wIov = (*wIov)[:0]
+						ctx.ResponseIov = ctx.ResponseIov[:0]
+					} else {
+						wIov[ctx.ResponsePos].Base = unsafe.Add(wIov[ctx.ResponsePos].Base, n)
+						wIov[ctx.ResponsePos].Len -= uint64(n)
 					}
 				}
 			}
@@ -363,7 +377,10 @@ func HTTPWorker(l int32, router HTTPRouter) {
 		closeConnection:
 			ctx.Check = 1 - ctx.Check
 			ctx.RequestBuffer.Reset()
+			ctx.ResponsePos = 0
+			ctx.ResponseIov = ctx.ResponseIov[:0]
 			ctxPool.Put(unsafe.Pointer(ctx))
+
 			Shutdown(c, SHUT_WR)
 			Close(c)
 			continue
@@ -392,8 +409,7 @@ func ListenAndServe(port uint16, router HTTPRouter) error {
 		return err
 	}
 
-	// nworkers := runtime.GOMAXPROCS(0) / 2
-	const nworkers = 1
+	nworkers := runtime.GOMAXPROCS(0) / 2
 	for i := 0; i < nworkers-1; i++ {
 		go HTTPWorker(l, router)
 	}
