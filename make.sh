@@ -21,10 +21,6 @@ printv()
 	if test $VERBOSITY -gt 0; then echo "$@"; fi
 }
 
-# NOTE(anton2920): don't like Google spying on me.
-GOPROXY=direct; export GOPROXY
-GOSUMDB=off; export GOSUMDB
-
 # NOTE(anton2920): disable Go 1.11+ package management.
 GO111MODULE=off; export GO111MODULE
 GOPATH=`go env GOPATH`:`pwd`/vendor; export GOPATH
@@ -34,19 +30,22 @@ STARTTIME=`date +%s`
 case $1 in
 	'' | debug)
 		CGO_ENABLED=1; export CGO_ENABLED
-		run go build -o $PROJECT -race -gcflags='all=-N -l -d=checkptr=0'
-		echo "Don't forget to clean up `go env GOCACHE` directory!"
+		run go build -o $PROJECT -race -pgo off -gcflags='all=-N -l -d=checkptr=0'
 		;;
-	all)
-		printv "Building Go standard library..."
-		run ./make-std.sh $VERBOSITYFLAGS
-		run $0 $VERBOSITYFLAGS release
-		;;
+
 	clean)
-		run rm -f $PROJECT $PROJECT.s $PROJECT.esc $PROJECT.test c.out cpu.pprof mem.pprof
+		run rm -f $PROJECT $PROJECT.s $PROJECT.esc $PROJECT.test c.out cpu.pprof cpu.png mem.pprof mem.png
 		run go clean -cache -modcache -testcache
 		run rm -rf `go env GOCACHE`
 		run rm -rf /tmp/cover*
+		;;
+	disas | disasm | disassembly)
+		printv go build -pgo off -gcflags="-S"
+		go build -gcflags="-S" >$PROJECT.s 2>&1
+		;;
+	esc | escape | escape-analysis)
+		printv go build -pgo off -gcflags="-m2"
+		go build -gcflags="-m2" >$PROJECT.m 2>&1
 		;;
 	fmt)
 		if which goimports >/dev/null; then
@@ -54,6 +53,11 @@ case $1 in
 		else
 			run gofmt -l -s -w *.go
 		fi
+		;;
+	objdump)
+		go build -o $PROJECT -pgo off
+		printvv go tool objdump -S -s ^main\. $PROJECT
+		go tool objdump -S -s ^main\. $PROJECT >$PROJECT.s
 		;;
 	prof | profile)
 		cp main.go main_back
@@ -69,13 +73,11 @@ case $1 in
 		run curl -o cpu.pprof "http://localhost:9090/debug/pprof/profile?seconds=60" 2>/dev/null
 		kill $PID
 		;;
-	vet)
-		run go vet
-		run $0 $VERBOSITYFLAGS clean
-		echo "Don't forget to clean up `go env GOCACHE` directory!"
+	release)
+		go build -o $PROJECT -ldflags="-s -w"
 		;;
-	disas | disasm | esc | escape | escape-analysis | objdump | release)
-		run ./make-rant.sh $VERBOSITYFLAGS $1
+	vet)
+		run go vet -asmdecl -assign -atomic -bools -buildtag -cgocall -composites -copylocks -directive -errorsas -framepointer -httpresponse -ifaceassert -loopclosure -lostcancel -nilfunc -printf -shift -sigchanyzer -slog -stdmethods -stringintconv -structtag -testinggoroutine -tests -timeformat -unmarshal -unreachable -unusedresult
 		;;
 esac
 

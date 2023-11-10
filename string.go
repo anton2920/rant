@@ -2,11 +2,11 @@ package main
 
 //go:noescape
 //go:nosplit
-func FindChar(haystack string, needle byte) int
+func FindChar(s string, c byte) int
 
 //go:noescape
 //go:nosplit
-func FindSubstring(haystack, needle string) int
+func FindSubstring(a, b string) int
 
 func StrToPositiveInt(xs string) (int, bool) {
 	var ret int

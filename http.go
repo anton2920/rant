@@ -11,8 +11,21 @@ type HTTPRequest struct {
 	Version string
 }
 
+type HTTPState int
+
+const (
+	HTTP_STATE_UNKNOWN HTTPState = iota
+
+	HTTP_STATE_METHOD
+	HTTP_STATE_URI
+	HTTP_STATE_VERSION
+	HTTP_STATE_HEADER
+
+	HTTP_STATE_DONE
+)
+
 type HTTPRequestParser struct {
-	State   int
+	State   HTTPState
 	Request HTTPRequest
 }
 
@@ -58,17 +71,6 @@ const (
 	HTTPResponseMethodNotAllowed      = "HTTP/1.1 405 Method Not Allowed\r\nContent-Type: text/html\r\nContent-Length: ...\r\nConnection: close\r\n\r\n"
 	HTTPResponseRequestTimeout        = "HTTP/1.1 408 HTTPRequest Timeout\r\nContent-Type: text/html\r\nContent-Length: ...\r\nConnection: close\r\n\r\n"
 	HTTPResponseRequestEntityTooLarge = "HTTP/1.1 413 HTTPRequest Entity Too Large\r\nContent-Type: text/html\r\nConent-Length: ...\r\nConnection: close\r\n\r\n"
-)
-
-const (
-	HTTP_STATE_UNKNOWN = iota
-
-	HTTP_STATE_METHOD
-	HTTP_STATE_URI
-	HTTP_STATE_VERSION
-	HTTP_STATE_HEADER
-
-	HTTP_STATE_DONE
 )
 
 func (w *HTTPResponse) AppendContentLength(contentLength int) {
@@ -303,13 +305,11 @@ func HTTPWorker(l int32, router HTTPRouter) {
 
 			// println("EVENT", e.Ident, e.Filter, e.Fflags&0xF, e.Data)
 
-			// runtime.Breakpoint()
-
 			switch c {
 			case l:
-				c, errno := Accept(l, nil, nil)
-				if c < 0 {
-					println("ERROR: failed to accept new connection: ", errno)
+				c, err := Accept(l, nil, nil)
+				if err != nil {
+					println("ERROR: failed to accept new connection:", err.Error())
 					continue
 				}
 
@@ -325,7 +325,7 @@ func HTTPWorker(l int32, router HTTPRouter) {
 					{Ident: uintptr(c), Filter: EVFILT_WRITE, Flags: EV_ADD | EV_CLEAR, Udata: udata},
 				}
 				if _, err := Kevent(kq, unsafe.Slice(&events[0], len(events)), nil, nil); err != nil {
-					println("ERROR: failed to add new events to kqueue", err.Error())
+					println("ERROR: failed to add new events to kqueue:", err.Error())
 					ctxPool.Put(unsafe.Pointer(ctx))
 				}
 				continue
@@ -337,14 +337,12 @@ func HTTPWorker(l int32, router HTTPRouter) {
 
 			ctx, check := GetContextAndCheck(e.Udata)
 			if check != ctx.Check {
-				// println("Invalid event", ctx, check, ctx.Check)
 				continue
 			}
 
 			switch e.Filter {
 			case EVFILT_READ:
 				if (e.Flags & EV_EOF) != 0 {
-					// println("Client disconnected: ", e.Ident)
 					goto closeConnection
 				}
 
@@ -360,7 +358,7 @@ func HTTPWorker(l int32, router HTTPRouter) {
 
 				n, err := Read(c, rBuf.RemainingSlice())
 				if err != nil {
-					println("ERROR: failed to read data from socket: ", err.Error())
+					println("ERROR: failed to read data from socket:", err.Error())
 					goto closeConnection
 				}
 				rBuf.Produce(int(n))
@@ -368,13 +366,12 @@ func HTTPWorker(l int32, router HTTPRouter) {
 				HTTPHandleRequests(wBuf, rBuf, parser, date, router)
 				n, err = Write(c, wBuf.UnconsumedSlice())
 				if err != nil {
-					println("ERROR: failed to write data to socket: ", err.Error())
+					println("ERROR: failed to write data to socket:", err.Error())
 					goto closeConnection
 				}
 				wBuf.Consume(int(n))
 			case EVFILT_WRITE:
 				if (e.Flags & EV_EOF) != 0 {
-					// println("Client disconnected: ", e.Ident)
 					goto closeConnection
 				}
 
@@ -382,7 +379,7 @@ func HTTPWorker(l int32, router HTTPRouter) {
 				if wBuf.UnconsumedLen() > 0 {
 					n, err := Write(c, wBuf.UnconsumedSlice())
 					if err != nil {
-						println("ERROR: failed to write data to socket: ", err.Error())
+						println("ERROR: failed to write data to socket:", err.Error())
 						goto closeConnection
 					}
 					wBuf.Consume(int(n))
@@ -393,7 +390,6 @@ func HTTPWorker(l int32, router HTTPRouter) {
 		closeConnection:
 			ctx.Check = 1 - ctx.Check
 			ctx.RequestBuffer.Reset()
-			ctx.ResponseBuffer.Reset()
 			ctxPool.Put(unsafe.Pointer(ctx))
 			Shutdown(c, SHUT_WR)
 			Close(c)
