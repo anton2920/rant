@@ -32,7 +32,6 @@ case $1 in
 		CGO_ENABLED=1; export CGO_ENABLED
 		run go build -o $PROJECT -race -pgo off -gcflags='all=-N -l -d=checkptr=0'
 		;;
-
 	clean)
 		run rm -f $PROJECT $PROJECT.s $PROJECT.esc $PROJECT.test c.out cpu.pprof cpu.png mem.pprof mem.png
 		run go clean -cache -modcache -testcache

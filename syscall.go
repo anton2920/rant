@@ -9,6 +9,7 @@ const (
 	SYS_clock_gettime = 232
 	SYS_close         = 6
 	SYS_exit          = 1
+	SYS_fcntl         = 92
 	SYS_fstat         = 551
 	SYS_ftruncate     = 480
 	SYS_kevent        = 560
@@ -72,6 +73,11 @@ func Close(fd int32) error {
 
 func Exit(status int32) {
 	RawSyscall(SYS_exit, uintptr(status), 0, 0)
+}
+
+func Fcntl(fd, cmd, arg int32) error {
+	_, _, errno := Syscall(SYS_fcntl, uintptr(fd), uintptr(cmd), uintptr(arg))
+	return SyscallError("fcntl failed with code", errno)
 }
 
 func Fstat(fd int32, sb *Stat) error {

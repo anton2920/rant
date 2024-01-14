@@ -31,7 +31,7 @@ type HTTPRequestParser struct {
 
 type HTTPResponse struct {
 	/* Holds pointers to response. Data must live long enough. */
-	Iov *[]Iovec
+	Iovs *[]Iovec
 
 	/* ContentLength is calculated with each WriteBodyNoCopy call. */
 	ContentLength int
@@ -45,7 +45,7 @@ type HTTPResponse struct {
 
 type HTTPContext struct {
 	RequestBuffer CircularBuffer
-	ResponseIov   []Iovec
+	ResponseIovs  []Iovec
 	ResponsePos   int
 
 	Parser HTTPRequestParser
@@ -74,32 +74,32 @@ const (
 )
 
 func (w *HTTPResponse) WriteResponseNoCopyFunc(contentType string, f func(*HTTPResponse)) {
-	*w.Iov = append(*w.Iov, IovecForString("HTTP/1.1 200 OK\r\nHost: rant\r\nDate: "), IovecForByteSlice(w.DateBuf), IovecForString("\r\nContent-Type: "), IovecForString(contentType), IovecForString("\r\nContent-Length: "), IovecForByteSlice(w.ContentLengthBuf), IovecForString("\r\n\r\n"))
-	contentLengthIdx := len(*w.Iov) - 2
+	*w.Iovs = append(*w.Iovs, IovecForString("HTTP/1.1 200 OK\r\nHost: rant\r\nDate: "), IovecForByteSlice(w.DateBuf), IovecForString("\r\nContent-Type: "), IovecForString(contentType), IovecForString("\r\nContent-Length: "), IovecForByteSlice(w.ContentLengthBuf), IovecForString("\r\n\r\n"))
+	contentLengthIdx := len(*w.Iovs) - 2
 
 	f(w)
 
 	n := SlicePutInt(w.ContentLengthBuf, int(w.ContentLength))
-	(*w.Iov)[contentLengthIdx].Len = uint64(n)
+	(*w.Iovs)[contentLengthIdx].Len = uint64(n)
 }
 
 func (w *HTTPResponse) WriteBodyNoCopy(body []byte) {
-	*w.Iov = append(*w.Iov, IovecForByteSlice(body))
+	*w.Iovs = append(*w.Iovs, IovecForByteSlice(body))
 	w.ContentLength += len(body)
 }
 
 func (w *HTTPResponse) WriteResponseNoCopy(contentType string, body []byte) {
 	n := SlicePutInt(w.ContentLengthBuf, len(body))
 
-	*w.Iov = append(*w.Iov, IovecForString("HTTP/1.1 200 OK\r\nHost: rant\r\nDate: "), IovecForByteSlice(w.DateBuf), IovecForString("\r\nContent-Type: "), IovecForString(contentType), IovecForString("\r\nContent-Length: "), IovecForByteSlice(w.ContentLengthBuf[:n]), IovecForString("\r\n\r\n"), IovecForByteSlice(body))
+	*w.Iovs = append(*w.Iovs, IovecForString("HTTP/1.1 200 OK\r\nHost: rant\r\nDate: "), IovecForByteSlice(w.DateBuf), IovecForString("\r\nContent-Type: "), IovecForString(contentType), IovecForString("\r\nContent-Length: "), IovecForByteSlice(w.ContentLengthBuf[:n]), IovecForString("\r\n\r\n"), IovecForByteSlice(body))
 }
 
 func (w *HTTPResponse) WriteBuiltinError(code int) {
 	switch code {
 	case HTTPStatusBadRequest:
-		*w.Iov = append(*w.Iov, IovecForString(HTTPResponseBadRequest))
+		*w.Iovs = append(*w.Iovs, IovecForString(HTTPResponseBadRequest))
 	case HTTPStatusNotFound:
-		*w.Iov = append(*w.Iov, IovecForString(HTTPResponseNotFound))
+		*w.Iovs = append(*w.Iovs, IovecForString(HTTPResponseNotFound))
 	}
 }
 
@@ -120,7 +120,7 @@ func NewHTTPContext() unsafe.Pointer {
 		println("ERROR: failed to create request buffer:", err.Error())
 		return nil
 	}
-	c.ResponseIov = make([]Iovec, 0, 256)
+	c.ResponseIovs = make([]Iovec, 0, 256)
 
 	return unsafe.Pointer(c)
 }
@@ -134,7 +134,7 @@ func GetContextAndCheck(ptr unsafe.Pointer) (*HTTPContext, uintptr) {
 	return ctx, check
 }
 
-func HTTPHandleRequests(wIov *[]Iovec, rBuf *CircularBuffer, rp *HTTPRequestParser, contentLengthBuf, dateBuf []byte, router HTTPRouter) {
+func HTTPHandleRequests(wIovs *[]Iovec, rBuf *CircularBuffer, rp *HTTPRequestParser, contentLengthBuf, dateBuf []byte, router HTTPRouter) {
 	var w HTTPResponse
 	r := &rp.Request
 
@@ -165,7 +165,7 @@ func HTTPHandleRequests(wIov *[]Iovec, rBuf *CircularBuffer, rp *HTTPRequestPars
 				case "GET":
 					r.Method = "GET"
 				default:
-					*wIov = append(*wIov, IovecForString(HTTPResponseMethodNotAllowed))
+					*wIovs = append(*wIovs, IovecForString(HTTPResponseMethodNotAllowed))
 					return
 				}
 				rBuf.Consume(len(r.Method) + 1)
@@ -179,7 +179,7 @@ func HTTPHandleRequests(wIov *[]Iovec, rBuf *CircularBuffer, rp *HTTPRequestPars
 
 				uriEnd := FindChar(unconsumed[:lineEnd], ' ')
 				if uriEnd == -1 {
-					*wIov = append(*wIov, IovecForString(HTTPResponseBadRequest))
+					*wIovs = append(*wIovs, IovecForString(HTTPResponseBadRequest))
 					return
 				}
 
@@ -195,7 +195,7 @@ func HTTPHandleRequests(wIov *[]Iovec, rBuf *CircularBuffer, rp *HTTPRequestPars
 				const httpVersionPrefix = "HTTP/"
 				httpVersion := unconsumed[uriEnd+1 : lineEnd]
 				if httpVersion[:len(httpVersionPrefix)] != httpVersionPrefix {
-					*wIov = append(*wIov, IovecForString(HTTPResponseBadRequest))
+					*wIovs = append(*wIovs, IovecForString(HTTPResponseBadRequest))
 					return
 				}
 				r.Version = httpVersion[len(httpVersionPrefix):]
@@ -213,7 +213,7 @@ func HTTPHandleRequests(wIov *[]Iovec, rBuf *CircularBuffer, rp *HTTPRequestPars
 			}
 		}
 
-		w.Iov = wIov
+		w.Iovs = wIovs
 		w.DateBuf = dateBuf
 		w.ContentLength = 0
 		w.ContentLengthBuf = contentLengthBuf
@@ -228,9 +228,9 @@ func HTTPHandleRequests(wIov *[]Iovec, rBuf *CircularBuffer, rp *HTTPRequestPars
 func HTTPWorker(l int32, router HTTPRouter) {
 	var pinner runtime.Pinner
 	var events [256]Kevent_t
+	var ctx *HTTPContext
+	var check uintptr
 	var tp Timespec
-
-	runtime.LockOSThread()
 
 	kq, err := Kqueue()
 	if err != nil {
@@ -273,11 +273,15 @@ func HTTPWorker(l int32, router HTTPRouter) {
 			case l:
 				c, err := Accept(l, nil, nil)
 				if err != nil {
+					code := err.(E).Code
+					if code == EAGAIN {
+						continue
+					}
 					println("ERROR: failed to accept new connection:", err.Error())
 					continue
 				}
 
-				ctx := (*HTTPContext)(ctxPool.Get())
+				ctx = (*HTTPContext)(ctxPool.Get())
 				if ctx == nil {
 					Fatal("Failed to acquire new HTTP context")
 				}
@@ -290,7 +294,7 @@ func HTTPWorker(l int32, router HTTPRouter) {
 				}
 				if _, err := Kevent(kq, unsafe.Slice(&events[0], len(events)), nil, nil); err != nil {
 					println("ERROR: failed to add new events to kqueue:", err.Error())
-					ctxPool.Put(unsafe.Pointer(ctx))
+					goto closeConnection
 				}
 				continue
 			case 1:
@@ -299,17 +303,17 @@ func HTTPWorker(l int32, router HTTPRouter) {
 				continue
 			}
 
-			ctx, check := GetContextAndCheck(e.Udata)
+			ctx, check = GetContextAndCheck(e.Udata)
 			if check != ctx.Check {
 				continue
 			}
 
+			if (e.Flags & EV_EOF) != 0 {
+				goto closeConnection
+			}
+
 			switch e.Filter {
 			case EVFILT_READ:
-				if (e.Flags & EV_EOF) != 0 {
-					goto closeConnection
-				}
-
 				rBuf := &ctx.RequestBuffer
 				parser := &ctx.Parser
 
@@ -326,49 +330,49 @@ func HTTPWorker(l int32, router HTTPRouter) {
 				}
 				rBuf.Produce(int(n))
 
-				HTTPHandleRequests(&ctx.ResponseIov, rBuf, parser, contentLengthBuf, dateBuf, router)
+				HTTPHandleRequests(&ctx.ResponseIovs, rBuf, parser, contentLengthBuf, dateBuf, router)
 
-				wIov := ctx.ResponseIov
-				n, err = Writev(c, wIov[ctx.ResponsePos:])
+				wIovs := ctx.ResponseIovs
+				n, err = Writev(c, wIovs[ctx.ResponsePos:])
 				if err != nil {
 					println("ERROR: failed to write data to socket:", err.Error())
 					goto closeConnection
 				}
 
-				for (ctx.ResponsePos < len(wIov)) && (n >= int64(wIov[ctx.ResponsePos].Len)) {
-					n -= int64(wIov[ctx.ResponsePos].Len)
+				for (ctx.ResponsePos < len(wIovs)) && (n >= int64(wIovs[ctx.ResponsePos].Len)) {
+					n -= int64(wIovs[ctx.ResponsePos].Len)
 					ctx.ResponsePos++
 				}
-				if ctx.ResponsePos == len(wIov) {
+				if ctx.ResponsePos == len(wIovs) {
 					ctx.ResponsePos = 0
-					ctx.ResponseIov = ctx.ResponseIov[:0]
+					ctx.ResponseIovs = ctx.ResponseIovs[:0]
 				} else {
-					wIov[ctx.ResponsePos].Base = unsafe.Add(wIov[ctx.ResponsePos].Base, n)
-					wIov[ctx.ResponsePos].Len -= uint64(n)
+					wIovs[ctx.ResponsePos].Base = unsafe.Add(wIovs[ctx.ResponsePos].Base, n)
+					wIovs[ctx.ResponsePos].Len -= uint64(n)
 				}
 			case EVFILT_WRITE:
-				if (e.Flags & EV_EOF) != 0 {
-					goto closeConnection
-				}
-
-				wIov := ctx.ResponseIov
-				if len(wIov[ctx.ResponsePos:]) > 0 {
-					n, err := Writev(c, wIov[ctx.ResponsePos:])
+				wIovs := ctx.ResponseIovs
+				if len(wIovs[ctx.ResponsePos:]) > 0 {
+					n, err := Writev(c, wIovs[ctx.ResponsePos:])
 					if err != nil {
+						code := err.(E).Code
+						if code == EAGAIN {
+							continue
+						}
 						println("ERROR: failed to write data to socket:", err.Error())
 						goto closeConnection
 					}
 
-					for (ctx.ResponsePos < len(wIov)) && (n >= int64(wIov[ctx.ResponsePos].Len)) {
-						n -= int64(wIov[ctx.ResponsePos].Len)
+					for (ctx.ResponsePos < len(wIovs)) && (n >= int64(wIovs[ctx.ResponsePos].Len)) {
+						n -= int64(wIovs[ctx.ResponsePos].Len)
 						ctx.ResponsePos++
 					}
-					if ctx.ResponsePos == len(wIov) {
+					if ctx.ResponsePos == len(wIovs) {
 						ctx.ResponsePos = 0
-						ctx.ResponseIov = ctx.ResponseIov[:0]
+						ctx.ResponseIovs = ctx.ResponseIovs[:0]
 					} else {
-						wIov[ctx.ResponsePos].Base = unsafe.Add(wIov[ctx.ResponsePos].Base, n)
-						wIov[ctx.ResponsePos].Len -= uint64(n)
+						wIovs[ctx.ResponsePos].Base = unsafe.Add(wIovs[ctx.ResponsePos].Base, n)
+						wIovs[ctx.ResponsePos].Len -= uint64(n)
 					}
 				}
 			}
@@ -378,7 +382,7 @@ func HTTPWorker(l int32, router HTTPRouter) {
 			ctx.Check = 1 - ctx.Check
 			ctx.RequestBuffer.Reset()
 			ctx.ResponsePos = 0
-			ctx.ResponseIov = ctx.ResponseIov[:0]
+			ctx.ResponseIovs = ctx.ResponseIovs[:0]
 			ctxPool.Put(unsafe.Pointer(ctx))
 
 			Shutdown(c, SHUT_WR)
@@ -395,7 +399,11 @@ func ListenAndServe(port uint16, router HTTPRouter) error {
 	}
 
 	var enable int32 = 1
-	if err = Setsockopt(l, SOL_SOCKET, SO_REUSEPORT, unsafe.Pointer(&enable), uint32(unsafe.Sizeof(enable))); err != nil {
+	if err := Setsockopt(l, SOL_SOCKET, SO_REUSEADDR, unsafe.Pointer(&enable), uint32(unsafe.Sizeof(enable))); err != nil {
+		return err
+	}
+
+	if err := Fcntl(l, F_SETFL, O_NONBLOCK); err != nil {
 		return err
 	}
 
