@@ -8,7 +8,7 @@ HTTP server supports only `GET` requests. Query parameters could be included but
 
 For an incomplete C version of this server, see [rant-c](https://github.com/anton2920/rant-c).
 
-# Performance
+## Performance
 
 Using [wrk](https://github.com/wg/wrk) I've measured performance of `net/http` and my server using rules of [Plaintext](https://github.com/TechEmpower/FrameworkBenchmarks/wiki/Project-Information-Framework-Tests-Overview#plaintext) benchmark. Results on my `i7 6700K` with 32 GiB RAM, sending 16 pipelined requests and receiving `text/plain` `Hello, world\n` responses are following:
 
@@ -40,6 +40,6 @@ Transfer/sec:    725.52MB
 
 Both server and `wrk` were running on one computer. For each server  `wrk` parameters were selected to produce the best results.
 
-# Copyright
+## Copyright
 
 Pavlovskii Anton, 2023-2024 (MIT). See [LICENSE](LICENSE) for more details.
