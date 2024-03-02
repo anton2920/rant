@@ -1,16 +1,16 @@
 # rant-go
 
-[Rant](https://rant.anton2920.ru) is the simple [X](https://x.com) clone built using an experimental high-performance HTTP server. It allows you to watch my short messages, search for them on client or on server and subscribe to updates using [RSS](https://rant.anton2920.ru/rss).
+[Rant](https://rant.anton2920.ru) is the simple [X](https://x.com) clone built using an experimental high-performance HTTP server. It allows you to watch you my short messages, search for them either on the client or on the server and subscribe to updates using [RSS](https://rant.anton2920.ru/rss).
 
-Server is built using Go and assembly without any packages, except for package `runtime` and its dependencies from Go's standard library. Currently only `freebsd/amd64` is supported.
+Server is built using Go and assembly without any packages, except for package `runtime` and its dependencies from Go's standard library (only because modern Go doesn't allow you to build executables without loading it with _runtime.a_). Currently only `freebsd/amd64` is supported.
 
-HTTP server supports only `GET` requests, query parameters can be included but must be parsed by hand. It also supports pipelining, infinite keep-alives and a lot of concurrent connections.
+HTTP server supports only `GET` requests. Query parameters could be included but must be parsed by hand. It also supports pipelining, infinite keep-alives and a lot of concurrent connections.
 
-For C version of this server, see https://github.com/anton2920/rant-c.
+For an incomplete C version of this server, see https://github.com/anton2920/rant-c.
 
 # Performance
 
-Using [wrk](https://github.com/wg/wrk) I've measured performance of `net/http` and my server using rules of [Plaintext](https://github.com/TechEmpower/FrameworkBenchmarks/wiki/Project-Information-Framework-Tests-Overview#plaintext) benchmark rules. Results on my `i7 6700K` with 32 GiB RAM, sending 16 pipelined requests with `text/plain` `Hello, world\n` response are following:
+Using [wrk](https://github.com/wg/wrk) I've measured performance of `net/http` and my server using rules of [Plaintext](https://github.com/TechEmpower/FrameworkBenchmarks/wiki/Project-Information-Framework-Tests-Overview#plaintext) benchmark. Results on my `i7 6700K` with 32 GiB RAM, sending 16 pipelined requests and receiving `text/plain` `Hello, world\n` responses are following:
 
 ```
 net/http:
@@ -38,8 +38,8 @@ Requests/sec: 5852009.97
 Transfer/sec:    725.52MB
 ```
 
-Both server and `wrk` were running on one computer. For each server  `wrk` parameters was selected to produce the highest results.
+Both server and `wrk` were running on one computer. For each server  `wrk` parameters were selected to produce the best results.
 
 # Copyright
 
-Pavlovskii Anton, 2023-2024 (MIT).
+Pavlovskii Anton, 2023-2024 (MIT). See [LICENSE](LICENSE) for more details.
