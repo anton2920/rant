@@ -6,7 +6,7 @@ Server is built using Go and assembly without any packages, except for package `
 
 HTTP server supports only `GET` requests. Query parameters could be included but must be parsed by hand. It also supports pipelining, infinite keep-alives and a lot of concurrent connections.
 
-For an incomplete C version of this server, see https://github.com/anton2920/rant-c.
+For an incomplete C version of this server, see [rant-c](https://github.com/anton2920/rant-c).
 
 # Performance
 
