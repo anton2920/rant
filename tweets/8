@@ -1,0 +1,1 @@
+FreeBSD documentation strikes again! Now it's kevent(2)'s man page, which doesn't mention EVFILT_SENDFILE flag. This is ridiculous. I've watched a couple of conference talks about new asynchronous sendfile(2) and couldn't figure out how to use it. Unless you're constantly reading header files, you wouldn't even know it's there.
